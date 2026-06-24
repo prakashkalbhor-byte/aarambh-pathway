@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>IRD — Vendor Registration Portal</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="doc.css">
+</head>
+<body>
+
+<nav class="doc-nav">
+  <a href="requirements.html">Overview</a>
+  <a href="frd.html">Functional (FRD)</a>
+  <a href="ird.html" class="active">Integration (IRD)</a>
+  <a href="trd.html">Technical (TRD)</a>
+</nav>
+
+<article class="page" data-screen-label="IRD">
+  <header class="doc-header">
+    <div class="meta-left">
+      <div class="doc-kind">Integration Requirements Document</div>
+      <div class="project">Vendor Registration Portal</div>
+    </div>
+    <div class="meta-right">
+      <div><b>Document ID</b> &nbsp; IRD-VRP-001</div>
+      <div><b>Version</b> &nbsp; 1.0 (Draft)</div>
+      <div><b>Date</b> &nbsp; June 24, 2026</div>
+      <div><b>Classification</b> &nbsp; Internal</div>
+    </div>
+  </header>
+
+  <h1 class="doc-title">Integration Requirements</h1>
+  <p class="doc-subtitle">External system interfaces, data contracts, message flows and error handling for the Vendor Registration Portal.</p>
+
+  <table class="cover-meta">
+    <tr><th>Owner</th><td>Enterprise Integration / Procurement IT</td></tr>
+    <tr><th>Author</th><td>Solution Architecture Team</td></tr>
+    <tr><th>Approvers</th><td>Integration Lead · CISO · ERP Platform Owner</td></tr>
+    <tr><th>Status</th><td>Draft for stakeholder review</td></tr>
+    <tr><th>Related</th><td>FRD-VRP-001, TRD-VRP-001</td></tr>
+  </table>
+
+  <div class="toc">
+    <div class="toc-title">Contents</div>
+    <ol>
+      <li><a href="#purpose">Purpose &amp; Scope</a><span class="dots"></span></li>
+      <li><a href="#landscape">Integration Landscape</a><span class="dots"></span></li>
+      <li><a href="#principles">Integration Principles</a><span class="dots"></span></li>
+      <li><a href="#catalogue">Interface Catalogue</a><span class="dots"></span></li>
+      <li><a href="#specs">Interface Specifications</a><span class="dots"></span></li>
+      <li><a href="#contracts">Data Contracts</a><span class="dots"></span></li>
+      <li><a href="#security">Integration Security</a><span class="dots"></span></li>
+      <li><a href="#errors">Error Handling &amp; Resilience</a><span class="dots"></span></li>
+      <li><a href="#nfr">Integration NFRs &amp; SLAs</a><span class="dots"></span></li>
+      <li><a href="#env">Environments &amp; Testing</a><span class="dots"></span></li>
+    </ol>
+  </div>
+
+  <!-- 1 -->
+  <h2 class="section" id="purpose"><span class="sec-num">01</span>Purpose &amp; Scope</h2>
+  <p class="lead">This document defines every integration point between the Vendor Registration Portal (VRP) and internal or third-party systems: the interface style, data contract, security, volumes, and failure behaviour. It is the authoritative reference for build, test and operational support of cross-system data exchange.</p>
+  <p>It covers identity, master data, ERP, qualification services (tax, sanctions, credit, banking), document storage, notifications, and analytics. It does <b>not</b> redefine functional behaviour (see FRD) or internal application architecture (see TRD).</p>
+
+  <!-- 2 LANDSCAPE -->
+  <h2 class="section" id="landscape"><span class="sec-num">02</span>Integration Landscape</h2>
+  <div class="flow">
+    <div class="node"><span class="n-id">IdP</span><span class="n-label">Identity Provider</span><div class="n-desc">OIDC · SCIM</div></div>
+    <div class="arrow">→</div>
+    <div class="node" style="flex:1.4"><span class="n-id">VRP</span><span class="n-label">Vendor Registration Portal</span><div class="n-desc">API Gateway · Integration Layer</div></div>
+    <div class="arrow">→</div>
+    <div class="node"><span class="n-id">MDM</span><span class="n-label">Master Data</span><div class="n-desc">Vendor ID</div></div>
+  </div>
+  <div class="flow">
+    <div class="node"><span class="n-label">Tax Registry</span><div class="n-desc">VIES · TIN</div></div>
+    <div class="node"><span class="n-label">Sanctions / PEP</span><div class="n-desc">Screening API</div></div>
+    <div class="node"><span class="n-label">Credit Bureau</span><div class="n-desc">Risk profile</div></div>
+    <div class="node"><span class="n-label">Banking Partner</span><div class="n-desc">Account verify</div></div>
+    <div class="node"><span class="n-label">ERP / S2P</span><div class="n-desc">Vendor master</div></div>
+    <div class="node"><span class="n-label">Email / SMS</span><div class="n-desc">Notifications</div></div>
+  </div>
+  <p>Integrations are mediated by an <b>Integration Layer</b> (iPaaS / ESB) and exposed/consumed through an <b>API Gateway</b>. No point-to-point connections between the VRP application and external endpoints are permitted (see §3).</p>
+
+  <!-- 3 PRINCIPLES -->
+  <h2 class="section" id="principles"><span class="sec-num">03</span>Integration Principles</h2>
+  <table class="req">
+    <thead><tr><th style="width:13%">ID</th><th style="width:30%">Principle</th><th>Statement</th></tr></thead>
+    <tbody>
+      <tr><td class="id">IP-01</td><td>Mediated, not point-to-point</td><td>All external traffic traverses the API Gateway and Integration Layer; the application holds no third-party credentials directly.</td></tr>
+      <tr><td class="id">IP-02</td><td>API-first &amp; contract-first</td><td>Every synchronous interface is defined by an OpenAPI 3.1 contract; every async event by a published JSON Schema, versioned and stored in the contract registry.</td></tr>
+      <tr><td class="id">IP-03</td><td>Event-driven where possible</td><td>State changes are emitted as events; consumers subscribe rather than poll.</td></tr>
+      <tr><td class="id">IP-04</td><td>Idempotency</td><td>All write operations accept an idempotency key; replays must not create duplicates.</td></tr>
+      <tr><td class="id">IP-05</td><td>Loose coupling &amp; versioning</td><td>Backward-compatible changes only within a major version; breaking changes require a new versioned endpoint and a deprecation window of 6 months.</td></tr>
+      <tr><td class="id">IP-06</td><td>Security by default</td><td>mTLS + OAuth 2.0 client credentials between services; least-privilege scopes; no PII in URLs or logs.</td></tr>
+      <tr><td class="id">IP-07</td><td>Observability</td><td>Every call carries a W3C <code class="inline">traceparent</code>; correlation IDs propagate end-to-end.</td></tr>
+    </tbody>
+  </table>
+
+  <!-- 4 CATALOGUE -->
+  <h2 class="section" id="catalogue"><span class="sec-num">04</span>Interface Catalogue</h2>
+  <table class="req">
+    <thead><tr><th style="width:11%">ID</th><th style="width:20%">System</th><th style="width:12%">Direction</th><th style="width:14%">Style</th><th style="width:13%">Pattern</th><th>Trigger</th></tr></thead>
+    <tbody>
+      <tr><td class="id">INT-01</td><td>Identity Provider</td><td>VRP ↔ IdP</td><td>OIDC / SCIM</td><td>Sync / Provision</td><td>Login, user provisioning</td></tr>
+      <tr><td class="id">INT-02</td><td>Tax Validation</td><td>VRP → Ext</td><td>REST (sync)</td><td>Request / Reply</td><td>On submit / tax field change</td></tr>
+      <tr><td class="id">INT-03</td><td>Sanctions &amp; PEP</td><td>VRP → Ext</td><td>REST (async)</td><td>Request + Callback</td><td>On submit, every 30 days</td></tr>
+      <tr><td class="id">INT-04</td><td>ERP Vendor Master</td><td>VRP → ERP</td><td>REST / iDoc</td><td>Command + Event</td><td>On approval, on change</td></tr>
+      <tr><td class="id">INT-05</td><td>MDM</td><td>VRP ↔ MDM</td><td>REST (sync)</td><td>Request / Reply</td><td>On approval (ID mint), dedupe</td></tr>
+      <tr><td class="id">INT-06</td><td>Credit Bureau</td><td>VRP → Ext</td><td>REST (sync)</td><td>Request / Reply</td><td>Risk tier B+ on submit</td></tr>
+      <tr><td class="id">INT-07</td><td>Banking Verification</td><td>VRP → Ext</td><td>REST (sync)</td><td>Request / Reply</td><td>On banking entry/change</td></tr>
+      <tr><td class="id">INT-08</td><td>Document Store</td><td>VRP ↔ Store</td><td>S3 API</td><td>Object I/O</td><td>Upload / retrieve</td></tr>
+      <tr><td class="id">INT-09</td><td>Malware Scan</td><td>VRP → Ext</td><td>REST (sync)</td><td>Request / Reply</td><td>Each upload</td></tr>
+      <tr><td class="id">INT-10</td><td>Notification (Email/SMS)</td><td>VRP → Ext</td><td>REST (async)</td><td>Fire-and-forget</td><td>State changes, reminders</td></tr>
+      <tr><td class="id">INT-11</td><td>Analytics / DWH</td><td>VRP → DWH</td><td>Event stream / CDC</td><td>Publish</td><td>All domain events</td></tr>
+      <tr><td class="id">INT-12</td><td>e-Signature</td><td>VRP ↔ Ext</td><td>REST + Webhook</td><td>Request + Callback</td><td>T&amp;C acceptance</td></tr>
+    </tbody>
+  </table>
+
+  <!-- 5 SPECS -->
+  <h2 class="section" id="specs"><span class="sec-num">05</span>Interface Specifications</h2>
+
+  <h3 class="sub"><span class="sub-num">5.1</span>INT-01 · Identity Provider (OIDC / SCIM)</h3>
+  <dl class="defs">
+    <dt>Purpose</dt><dd>Authenticate internal users via SSO; provision/de-provision internal accounts and roles.</dd>
+    <dt>Protocol</dt><dd>OpenID Connect (Authorization Code + PKCE); SCIM 2.0 for provisioning.</dd>
+    <dt>Auth</dt><dd>Client secret + PKCE; JWKS-validated ID tokens.</dd>
+    <dt>Data</dt><dd>sub, email, name, groups → mapped to VRP roles.</dd>
+    <dt>Frequency</dt><dd>Interactive (login); SCIM near-real-time on HR changes.</dd>
+  </dl>
+  <table class="req">
+    <thead><tr><th style="width:13%">ID</th><th>Requirement</th></tr></thead>
+    <tbody>
+      <tr><td class="id">INT-01-R1</td><td>VRP shall accept only RS256-signed ID tokens validated against the IdP JWKS endpoint, with clock skew tolerance ≤ 60 s.</td></tr>
+      <tr><td class="id">INT-01-R2</td><td>Group-to-role mapping shall be configurable; an unmapped group results in no access (deny by default).</td></tr>
+      <tr><td class="id">INT-01-R3</td><td>SCIM deactivation shall revoke active sessions within 5 minutes.</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sub"><span class="sub-num">5.2</span>INT-04 · ERP Vendor Master Publish</h3>
+  <dl class="defs">
+    <dt>Purpose</dt><dd>Create/update the vendor master record in ERP on approval and on subsequent approved changes.</dd>
+    <dt>Protocol</dt><dd>REST POST <code class="inline">/vendors</code> (preferred) or iDoc <code class="inline">CREMAS</code> via the Integration Layer.</dd>
+    <dt>Pattern</dt><dd>Synchronous command for ID confirmation; async event for status changes (suspend/inactivate).</dd>
+    <dt>Idempotency</dt><dd>Header <code class="inline">Idempotency-Key</code> = VRP registration UUID.</dd>
+  </dl>
+  <h4 class="sub2">Sample Request</h4>
+  <pre><span class="c">// POST /erp/v1/vendors  — INT-04</span>
+{
+  <span class="k">"idempotencyKey"</span>: <span class="s">"f1c2-9a8b-4d3e"</span>,
+  <span class="k">"vrpRegistrationId"</span>: <span class="s">"VRP-2026-018734"</span>,
+  <span class="k">"legalName"</span>: <span class="s">"Acme Components Pvt Ltd"</span>,
+  <span class="k">"taxId"</span>: <span class="s">"27AABCA1234F1Z5"</span>,
+  <span class="k">"country"</span>: <span class="s">"IN"</span>,
+  <span class="k">"category"</span>: [<span class="s">"31160000"</span>, <span class="s">"40140000"</span>],
+  <span class="k">"addresses"</span>: [{ <span class="k">"type"</span>: <span class="s">"REGISTERED"</span>, <span class="k">"line1"</span>: <span class="s">"..."</span>, <span class="k">"city"</span>: <span class="s">"Pune"</span>, <span class="k">"postal"</span>: <span class="s">"411001"</span> }],
+  <span class="k">"banking"</span>: [{ <span class="k">"currency"</span>: <span class="s">"INR"</span>, <span class="k">"iban"</span>: <span class="s">null</span>, <span class="k">"accountNo"</span>: <span class="s">"****4821"</span>, <span class="k">"ifsc"</span>: <span class="s">"HDFC0000123"</span> }],
+  <span class="k">"riskTier"</span>: <span class="s">"LOW"</span>
+}</pre>
+  <h4 class="sub2">Sample Response</h4>
+  <pre>{
+  <span class="k">"erpVendorId"</span>: <span class="s">"0001045892"</span>,
+  <span class="k">"status"</span>: <span class="s">"CREATED"</span>,
+  <span class="k">"createdAt"</span>: <span class="s">"2026-06-24T09:14:22Z"</span>
+}</pre>
+  <table class="req">
+    <thead><tr><th style="width:13%">ID</th><th>Requirement</th></tr></thead>
+    <tbody>
+      <tr><td class="id">INT-04-R1</td><td>VRP shall not mark a registration <code class="inline">ACTIVE</code> until ERP returns <code class="inline">CREATED</code> with an <code class="inline">erpVendorId</code>.</td></tr>
+      <tr><td class="id">INT-04-R2</td><td>On a 5xx or timeout, VRP shall retry with exponential backoff (max 5 attempts) preserving the idempotency key, then move to <code class="inline">PUBLISH_FAILED</code>.</td></tr>
+      <tr><td class="id">INT-04-R3</td><td>Banking fields shall be transmitted in full only over the mediated, encrypted channel; portal logs shall mask all but the last 4 digits.</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sub"><span class="sub-num">5.3</span>INT-03 · Sanctions &amp; PEP Screening (Async)</h3>
+  <dl class="defs">
+    <dt>Purpose</dt><dd>Screen the organisation, officers and UBOs against sanctions/watchlist/PEP datasets.</dd>
+    <dt>Pattern</dt><dd>Submit screening request → provider processes → webhook callback with results.</dd>
+    <dt>Callback</dt><dd>Signed webhook (HMAC-SHA256) to <code class="inline">/webhooks/screening</code>.</dd>
+    <dt>SLA</dt><dd>P95 result within 60 s; periodic re-screen every 30 days (batch).</dd>
+  </dl>
+  <pre><span class="c">// Webhook payload — INT-03 callback</span>
+{
+  <span class="k">"requestId"</span>: <span class="s">"scr_8842"</span>,
+  <span class="k">"vrpRegistrationId"</span>: <span class="s">"VRP-2026-018734"</span>,
+  <span class="k">"decision"</span>: <span class="s">"REVIEW"</span>,          <span class="c">// CLEAR | REVIEW | HIT</span>
+  <span class="k">"matches"</span>: [
+    { <span class="k">"entity"</span>: <span class="s">"officer:J. Doe"</span>, <span class="k">"list"</span>: <span class="s">"OFAC-SDN"</span>, <span class="k">"score"</span>: 0.82 }
+  ]
+}</pre>
+  <table class="req">
+    <thead><tr><th style="width:13%">ID</th><th>Requirement</th></tr></thead>
+    <tbody>
+      <tr><td class="id">INT-03-R1</td><td>A <code class="inline">HIT</code> or <code class="inline">REVIEW</code> decision shall move the record to <code class="inline">ON_HOLD</code> and create a Compliance task (FRD BR-004).</td></tr>
+      <tr><td class="id">INT-03-R2</td><td>Webhook signatures shall be verified; unsigned or invalid callbacks are rejected and alerted.</td></tr>
+      <tr><td class="id">INT-03-R3</td><td>If no callback is received within 10 minutes, VRP shall poll the status endpoint as a fallback.</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sub"><span class="sub-num">5.4</span>INT-11 · Domain Event Stream</h3>
+  <p>VRP publishes domain events to a durable topic for analytics, audit replication, and downstream subscribers. Events are JSON, schema-versioned, and keyed by <code class="inline">registrationId</code>.</p>
+  <table class="req">
+    <thead><tr><th style="width:30%">Event</th><th style="width:18%">Key</th><th>Emitted When</th></tr></thead>
+    <tbody>
+      <tr><td class="id">vendor.registration.submitted</td><td>registrationId</td><td>Vendor submits</td></tr>
+      <tr><td class="id">vendor.screening.completed</td><td>registrationId</td><td>Screening callback processed</td></tr>
+      <tr><td class="id">vendor.review.decision</td><td>registrationId</td><td>Any reviewer decision</td></tr>
+      <tr><td class="id">vendor.approved</td><td>registrationId</td><td>Final approval</td></tr>
+      <tr><td class="id">vendor.published</td><td>erpVendorId</td><td>ERP confirms creation</td></tr>
+      <tr><td class="id">vendor.suspended</td><td>erpVendorId</td><td>Compliance/doc-expiry breach</td></tr>
+    </tbody>
+  </table>
+
+  <!-- 6 DATA CONTRACTS -->
+  <h2 class="section" id="contracts"><span class="sec-num">06</span>Data Contracts</h2>
+  <table class="req">
+    <thead><tr><th style="width:20%">Field</th><th style="width:14%">Type</th><th style="width:12%">Required</th><th>Rule / Format</th></tr></thead>
+    <tbody>
+      <tr><td class="id">legalName</td><td>string(200)</td><td class="center">Yes</td><td>Trimmed; non-empty; matches registry where available.</td></tr>
+      <tr><td class="id">taxId</td><td>string(40)</td><td class="center">Yes</td><td>Country-specific format; validated via INT-02.</td></tr>
+      <tr><td class="id">country</td><td>string(2)</td><td class="center">Yes</td><td>ISO 3166-1 alpha-2.</td></tr>
+      <tr><td class="id">currency</td><td>string(3)</td><td class="center">Yes</td><td>ISO 4217.</td></tr>
+      <tr><td class="id">iban</td><td>string(34)</td><td class="center">Cond.</td><td>Required where IBAN country; mod-97 check.</td></tr>
+      <tr><td class="id">category[]</td><td>string(8)</td><td class="center">Yes</td><td>UNSPSC L3 codes; 1–10 entries.</td></tr>
+      <tr><td class="id">riskTier</td><td>enum</td><td class="center">Yes</td><td>LOW | MEDIUM | HIGH.</td></tr>
+      <tr><td class="id">idempotencyKey</td><td>uuid</td><td class="center">Yes</td><td>Unique per logical write.</td></tr>
+    </tbody>
+  </table>
+  <div class="note">All shared enumerations (country, currency, category, reason codes) are sourced from a single reference-data service; consumers must not hard-code values.</div>
+
+  <!-- 7 SECURITY -->
+  <h2 class="section" id="security"><span class="sec-num">07</span>Integration Security</h2>
+  <table class="req">
+    <thead><tr><th style="width:13%">ID</th><th style="width:26%">Control</th><th>Requirement</th></tr></thead>
+    <tbody>
+      <tr><td class="id">SEC-INT-01</td><td>Transport</td><td>TLS 1.2+ for all external calls; mutual TLS between internal services.</td></tr>
+      <tr><td class="id">SEC-INT-02</td><td>Authentication</td><td>OAuth 2.0 client-credentials with short-lived tokens; secrets in a managed vault, rotated ≤ 90 days.</td></tr>
+      <tr><td class="id">SEC-INT-03</td><td>Authorization</td><td>Per-interface scopes; least privilege; deny by default.</td></tr>
+      <tr><td class="id">SEC-INT-04</td><td>Webhook integrity</td><td>HMAC-SHA256 signature + timestamp + nonce; reject replays older than 5 min.</td></tr>
+      <tr><td class="id">SEC-INT-05</td><td>Data protection</td><td>PII/banking encrypted in transit and at rest; field masking in logs and traces.</td></tr>
+      <tr><td class="id">SEC-INT-06</td><td>Rate limiting</td><td>Per-client quotas at the gateway; 429 with <code class="inline">Retry-After</code> on breach.</td></tr>
+      <tr><td class="id">SEC-INT-07</td><td>Allow-listing</td><td>External callbacks accepted only from published provider IP ranges.</td></tr>
+    </tbody>
+  </table>
+
+  <!-- 8 ERRORS -->
+  <h2 class="section" id="errors"><span class="sec-num">08</span>Error Handling &amp; Resilience</h2>
+  <table class="req">
+    <thead><tr><th style="width:13%">ID</th><th style="width:26%">Concern</th><th>Requirement</th></tr></thead>
+    <tbody>
+      <tr><td class="id">RES-01</td><td>Retries</td><td>Transient failures (timeout, 5xx, 429) retried with exponential backoff + jitter; max attempts per interface as configured.</td></tr>
+      <tr><td class="id">RES-02</td><td>Idempotency</td><td>Retried writes reuse the idempotency key to prevent duplicate side effects.</td></tr>
+      <tr><td class="id">RES-03</td><td>Circuit breaker</td><td>A provider exceeding the error/latency threshold is short-circuited; the portal degrades gracefully (queues work) rather than failing the journey.</td></tr>
+      <tr><td class="id">RES-04</td><td>Dead-letter queue</td><td>Unprocessable async messages move to a DLQ with full context for manual replay.</td></tr>
+      <tr><td class="id">RES-05</td><td>Compensation</td><td>If ERP create succeeds but a later step fails, a compensating event reconciles or flags the inconsistency.</td></tr>
+      <tr><td class="id">RES-06</td><td>Standard error shape</td><td>All synchronous errors use RFC 9457 <code class="inline">application/problem+json</code> with a stable <code class="inline">type</code> and correlation ID.</td></tr>
+    </tbody>
+  </table>
+  <pre><span class="c">// RFC 9457 problem+json</span>
+{
+  <span class="k">"type"</span>: <span class="s">"https://vrp/errors/erp-unavailable"</span>,
+  <span class="k">"title"</span>: <span class="s">"ERP temporarily unavailable"</span>,
+  <span class="k">"status"</span>: 503,
+  <span class="k">"correlationId"</span>: <span class="s">"c-7f3a91"</span>,
+  <span class="k">"retryable"</span>: <span class="k">true</span>
+}</pre>
+
+  <!-- 9 NFR -->
+  <h2 class="section" id="nfr"><span class="sec-num">09</span>Integration NFRs &amp; SLAs</h2>
+  <table class="req">
+    <thead><tr><th style="width:12%">Interface</th><th style="width:18%">Latency (P95)</th><th style="width:18%">Availability</th><th>Volume (peak)</th></tr></thead>
+    <tbody>
+      <tr><td class="id">INT-02 Tax</td><td>&lt; 2 s</td><td>99.0%</td><td>2 000 / day</td></tr>
+      <tr><td class="id">INT-03 Sanctions</td><td>&lt; 60 s (async)</td><td>99.0%</td><td>3 000 / day incl. re-screen</td></tr>
+      <tr><td class="id">INT-04 ERP</td><td>&lt; 3 s</td><td>99.5%</td><td>200 / day</td></tr>
+      <tr><td class="id">INT-05 MDM</td><td>&lt; 1.5 s</td><td>99.5%</td><td>400 / day</td></tr>
+      <tr><td class="id">INT-08 Docs</td><td>&lt; 1 s/obj</td><td>99.9%</td><td>5 000 objects / day</td></tr>
+      <tr><td class="id">INT-10 Notify</td><td>&lt; 5 s enqueue</td><td>99.0%</td><td>20 000 / day</td></tr>
+    </tbody>
+  </table>
+
+  <!-- 10 ENV -->
+  <h2 class="section" id="env"><span class="sec-num">10</span>Environments &amp; Testing</h2>
+  <table class="req">
+    <thead><tr><th style="width:18%">Environment</th><th style="width:32%">External Connectivity</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td class="id">DEV</td><td>Mocked / sandbox endpoints</td><td>Component development against stubs and provider sandboxes.</td></tr>
+      <tr><td class="id">SIT</td><td>Provider sandboxes</td><td>System integration testing of full message flows.</td></tr>
+      <tr><td class="id">UAT</td><td>Sandbox + masked prod-like data</td><td>Business acceptance, contract verification.</td></tr>
+      <tr><td class="id">PROD</td><td>Live endpoints</td><td>Production operation.</td></tr>
+    </tbody>
+  </table>
+  <ul>
+    <li><b>Contract testing</b> (consumer-driven) runs in CI for every interface; a broken contract fails the pipeline.</li>
+    <li><b>Synthetic monitors</b> exercise each critical interface every 5 minutes in PROD.</li>
+    <li>No real banking or PII data is permitted in non-production environments; data is masked or synthetic.</li>
+  </ul>
+
+  <div class="signoff">
+    <div class="sig"><div class="role">Approved · Integration Lead</div><div class="name">________________________</div></div>
+    <div class="sig"><div class="role">Approved · ERP Platform Owner</div><div class="name">________________________</div></div>
+    <div class="sig"><div class="role">Approved · CISO</div><div class="name">________________________</div></div>
+    <div class="sig"><div class="role">Approved · Solution Architect</div><div class="name">________________________</div></div>
+  </div>
+
+  <div class="page-footer">
+    <span>IRD-VRP-001 · v1.0 Draft</span>
+    <span>Vendor Registration Portal</span>
+    <span>Page 1</span>
+  </div>
+</article>
+
+</body>
+</html>

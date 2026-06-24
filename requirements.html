@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Requirements — Vendor Registration Portal</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="doc.css">
+<style>
+  .hero {
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 28px;
+    margin-bottom: 36px;
+  }
+  .hero .eyebrow {
+    font-family: var(--sans);
+    font-size: 9.5pt;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    font-weight: 500;
+  }
+  .hero h1 {
+    font-family: var(--sans);
+    font-size: 34pt;
+    font-weight: 700;
+    letter-spacing: -0.025em;
+    line-height: 1.04;
+    margin: 10px 0 6px;
+  }
+  .hero p { font-style: italic; color: var(--ink-3); font-size: 12.5pt; max-width: 60ch; }
+  .doc-cards { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin: 8px 0 36px; }
+  .doc-card {
+    border: 1px solid var(--rule);
+    background: var(--paper-2);
+    padding: 22px 20px;
+    text-decoration: none;
+    color: var(--ink);
+    display: flex;
+    flex-direction: column;
+    transition: border-color .15s, transform .15s;
+  }
+  .doc-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+  .doc-card .dc-code {
+    font-family: var(--mono);
+    font-size: 9pt;
+    color: var(--accent);
+    font-weight: 500;
+  }
+  .doc-card .dc-name {
+    font-family: var(--sans);
+    font-size: 15pt;
+    font-weight: 600;
+    margin: 10px 0 8px;
+    letter-spacing: -0.01em;
+  }
+  .doc-card .dc-desc { font-family: var(--serif); font-size: 10pt; color: var(--ink-2); flex: 1; }
+  .doc-card .dc-open {
+    font-family: var(--sans);
+    font-size: 9pt;
+    color: var(--accent);
+    font-weight: 600;
+    margin-top: 16px;
+    letter-spacing: 0.04em;
+  }
+</style>
+</head>
+<body>
+
+<nav class="doc-nav">
+  <a href="requirements.html" class="active">Overview</a>
+  <a href="frd.html">Functional (FRD)</a>
+  <a href="ird.html">Integration (IRD)</a>
+  <a href="trd.html">Technical (TRD)</a>
+</nav>
+
+<article class="page" data-screen-label="Requirements Overview">
+  <div class="hero">
+    <div class="eyebrow">Requirements Package · VRP</div>
+    <h1>Vendor Registration Portal</h1>
+    <p>The complete requirements set governing the design, integration and build of the Vendor Registration Portal.</p>
+  </div>
+
+  <div class="doc-cards">
+    <a class="doc-card" href="frd.html">
+      <span class="dc-code">FRD-VRP-001</span>
+      <span class="dc-name">Functional Requirements</span>
+      <span class="dc-desc">Actors, user journeys, the registration wizard, qualification checks, review &amp; approval workflow, business rules and acceptance criteria.</span>
+      <span class="dc-open">Open document →</span>
+    </a>
+    <a class="doc-card" href="ird.html">
+      <span class="dc-code">IRD-VRP-001</span>
+      <span class="dc-name">Integration Requirements</span>
+      <span class="dc-desc">Interface catalogue and specifications for identity, ERP, MDM, tax, sanctions, banking, documents and notifications — with data contracts and error handling.</span>
+      <span class="dc-open">Open document →</span>
+    </a>
+    <a class="doc-card" href="trd.html">
+      <span class="dc-code">TRD-VRP-001</span>
+      <span class="dc-name">Technical Requirements</span>
+      <span class="dc-desc">Architecture, technology stack, data model, security, infrastructure, observability, performance, DR and engineering quality standards.</span>
+      <span class="dc-open">Open document →</span>
+    </a>
+  </div>
+
+  <h2 class="section"><span class="sec-num">01</span>About this package</h2>
+  <p class="lead">These three documents are designed to be read together. The FRD defines <i>what</i> the portal must do, the IRD defines <i>how it connects</i> to surrounding systems, and the TRD defines <i>how it is built and run</i>. Requirement IDs are stable and cross-referenced between documents.</p>
+
+  <h2 class="section"><span class="sec-num">02</span>Document register</h2>
+  <table class="req">
+    <thead><tr><th>Document</th><th>ID</th><th>Version</th><th>Status</th><th>Owner</th></tr></thead>
+    <tbody>
+      <tr><td>Functional Requirements</td><td class="id">FRD-VRP-001</td><td>1.0</td><td>Draft</td><td>Procurement Operations</td></tr>
+      <tr><td>Integration Requirements</td><td class="id">IRD-VRP-001</td><td>1.0</td><td>Draft</td><td>Enterprise Integration</td></tr>
+      <tr><td>Technical Requirements</td><td class="id">TRD-VRP-001</td><td>1.0</td><td>Draft</td><td>Engineering / Platform</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section"><span class="sec-num">03</span>How requirement IDs work</h2>
+  <table class="req">
+    <thead><tr><th style="width:22%">Prefix</th><th style="width:24%">Document</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td class="id">FR-XXX-nn</td><td>FRD</td><td>Functional requirement, grouped by area (AAM, PRO, DOC, QUA, WF, ONB, MNT, NOT, RPT, SEC).</td></tr>
+      <tr><td class="id">BR-nnn</td><td>FRD</td><td>Business rule.</td></tr>
+      <tr><td class="id">NFR-XXX-nn</td><td>FRD</td><td>Non-functional requirement.</td></tr>
+      <tr><td class="id">INT-nn</td><td>IRD</td><td>An external interface; sub-requirements as INT-nn-Rn.</td></tr>
+      <tr><td class="id">TSEC / INF / OPS …</td><td>TRD</td><td>Technical requirements by domain (security, infra, ops, perf, DR, QA).</td></tr>
+    </tbody>
+  </table>
+
+  <div class="page-footer">
+    <span>Requirements Package · v1.0 Draft</span>
+    <span>Vendor Registration Portal</span>
+    <span>Overview</span>
+  </div>
+</article>
+
+</body>
+</html>
