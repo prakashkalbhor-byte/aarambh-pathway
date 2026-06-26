@@ -1132,4 +1132,823 @@ async def export_vendors_xlsx(user: dict = Depends(require_role("admin", "approv
         headers={"Content-Disposition": f'attachment; filename="{fname}"'}
     )
 
+# ---------------------------------------------------------------------------
+# Iter 3 — Categories, Compliance (stub), Settings: change-password & prefs
+# ---------------------------------------------------------------------------
+
+# ---- Categories ----
+class CategoryFamilyIn(BaseModel):
+    name: str
+
+class CategorySubIn(BaseModel):
+    name: str
+    tier: str = "Tier 2"
+    sla: str = "45d"
+
+DEFAULT_TAXONOMY = [
+    {"name": "Direct materials", "featured": True, "children": [
+        {"name": "Mechanical components", "tier": "Tier 1-3", "sla": "30/45/60d", "vendor_count": 32},
+        {"name": "Electrical & electronics", "tier": "Tier 1-2", "sla": "30/45d", "vendor_count": 21},
+        {"name": "Polymers & rubber", "tier": "Tier 2-3", "sla": "45/60d", "vendor_count": 18},
+        {"name": "Castings & forgings", "tier": "Tier 1", "sla": "30d", "vendor_count": 13},
+    ]},
+    {"name": "Indirect spend", "featured": False, "children": [
+        {"name": "Office supplies", "tier": "Tier 3", "sla": "60d", "vendor_count": 24},
+        {"name": "Facilities & maintenance", "tier": "Tier 2", "sla": "45d", "vendor_count": 31},
+        {"name": "Travel & hospitality", "tier": "Tier 2", "sla": "45d", "vendor_count": 17},
+        {"name": "Marketing services", "tier": "Tier 2", "sla": "45d", "vendor_count": 19},
+    ]},
+    {"name": "Logistics", "featured": False, "children": [
+        {"name": "Inbound freight", "tier": "Tier 1", "sla": "30d", "vendor_count": 14},
+        {"name": "Outbound distribution", "tier": "Tier 1", "sla": "30d", "vendor_count": 16},
+        {"name": "Warehousing 3PL", "tier": "Tier 2", "sla": "45d", "vendor_count": 8},
+    ]},
+    {"name": "Professional services", "featured": False, "children": [
+        {"name": "Legal & compliance", "tier": "Tier 1", "sla": "30d", "vendor_count": 6},
+        {"name": "IT & SaaS", "tier": "Tier 2", "sla": "45d", "vendor_count": 22},
+        {"name": "Consulting", "tier": "Tier 1", "sla": "30d", "vendor_count": 6},
+    ]},
+]
+
+async def _seed_taxonomy_if_empty():
+    cnt = await db.categories.count_documents({})
+    if cnt > 0:
+        return
+    for fam in DEFAULT_TAXONOMY:
+        await db.categories.insert_one({
+            "family_id": f"fam_{uuid.uuid4().hex[:8]}",
+            "name": fam["name"],
+            "featured": fam.get("featured", False),
+            "vendor_count": sum(c["vendor_count"] for c in fam["children"]),
+            "children": [{
+                "sub_id": f"sub_{uuid.uuid4().hex[:8]}",
+                **c,
+            } for c in fam["children"]],
+            "created_at": now_utc(),
+        })
+
+@api.get("/categories")
+async def list_categories(user: dict = Depends(get_current_user)):
+    await _seed_taxonomy_if_empty()
+    cursor = db.categories.find({}, {"_id": 0}).sort("name", 1)
+    return [doc async for doc in cursor]
+
+@api.post("/categories")
+async def create_family(body: CategoryFamilyIn, user: dict = Depends(require_role("admin"))):
+    doc = {
+        "family_id": f"fam_{uuid.uuid4().hex[:8]}",
+        "name": body.name,
+        "featured": False,
+        "vendor_count": 0,
+        "children": [],
+        "created_at": now_utc(),
+    }
+    await db.categories.insert_one(doc)
+    return {k: v for k, v in doc.items() if k != "_id"}
+
+@api.post("/categories/{family_id}/sub")
+async def create_sub(family_id: str, body: CategorySubIn, user: dict = Depends(require_role("admin"))):
+    sub = {
+        "sub_id": f"sub_{uuid.uuid4().hex[:8]}",
+        "name": body.name,
+        "tier": body.tier,
+        "sla": body.sla,
+        "vendor_count": 0,
+    }
+    res = await db.categories.update_one(
+        {"family_id": family_id},
+        {"$push": {"children": sub}}
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Family not found")
+    return sub
+
+@api.delete("/categories/{family_id}/sub/{sub_id}")
+async def delete_sub(family_id: str, sub_id: str, user: dict = Depends(require_role("admin"))):
+    await db.categories.update_one(
+        {"family_id": family_id},
+        {"$pull": {"children": {"sub_id": sub_id}}}
+    )
+    return {"ok": True}
+
+# ---- Compliance Validation (stubbed external APIs) ----
+def _stub_compliance_checks(v: dict) -> list:
+    """Stubbed responses; replace with real ClearTax/GSTN/MCA21/OFAC providers when keys are available."""
+    c = v.get("compliance") or {}
+    g = v.get("general") or {}
+    b = v.get("bank") or {}
+    checks = []
+
+    # 1. GSTIN status
+    if c.get("gstin") and GSTIN_RE.match(c["gstin"]):
+        checks.append({"name": "GSTIN active (GSTN)", "status": "Pass", "tone": "emerald",
+                       "detail": f"{c['gstin']} · Active · stub response (no live ClearTax key)"})
+    elif c.get("gstin"):
+        checks.append({"name": "GSTIN active (GSTN)", "status": "Fail", "tone": "rose",
+                       "detail": "GSTIN format invalid"})
+    else:
+        checks.append({"name": "GSTIN active (GSTN)", "status": "Warn", "tone": "amber",
+                       "detail": "No GSTIN on file"})
+
+    # 2. PAN ↔ Legal name
+    if c.get("pan") and PAN_RE.match(c["pan"]):
+        checks.append({"name": "PAN ↔ Legal name match", "status": "Pass", "tone": "emerald",
+                       "detail": f"PAN {c['pan']} matches '{g.get('legal_name', '—')}' (stubbed)"})
+    elif c.get("pan"):
+        checks.append({"name": "PAN ↔ Legal name match", "status": "Fail", "tone": "rose",
+                       "detail": "PAN format invalid"})
+    else:
+        checks.append({"name": "PAN ↔ Legal name match", "status": "Fail", "tone": "rose",
+                       "detail": "PAN is required"})
+
+    # 3. MSME / Udyam
+    if c.get("msme_number"):
+        checks.append({"name": "MSME / Udyam certificate", "status": "Pass", "tone": "emerald",
+                       "detail": f"{c['msme_number']} · valid (stubbed)"})
+    elif v.get("vendor_type") == "msme":
+        checks.append({"name": "MSME / Udyam certificate", "status": "Fail", "tone": "rose",
+                       "detail": "Required for MSME vendor type"})
+    else:
+        checks.append({"name": "MSME / Udyam certificate", "status": "Pass", "tone": "emerald",
+                       "detail": "N/A — not registered as MSME"})
+
+    # 4. MCA21 entity status
+    if g.get("legal_name"):
+        checks.append({"name": "MCA21 entity status", "status": "Pass", "tone": "emerald",
+                       "detail": "Active (stub — wire MCA21 API)"})
+    else:
+        checks.append({"name": "MCA21 entity status", "status": "Warn", "tone": "amber",
+                       "detail": "Legal name missing"})
+
+    # 5. Bank account penny-drop
+    if b.get("account_number") and b.get("ifsc_code") and IFSC_RE.match(b["ifsc_code"]):
+        checks.append({"name": "Bank account penny-drop", "status": "Pass", "tone": "emerald",
+                       "detail": f"{b['ifsc_code']} · holder name matched (stubbed)"})
+    else:
+        checks.append({"name": "Bank account penny-drop", "status": "Warn", "tone": "amber",
+                       "detail": "Bank details incomplete or IFSC invalid"})
+
+    # 6. OFAC / sanctions
+    checks.append({"name": "OFAC / sanctions screening", "status": "Pass", "tone": "emerald",
+                   "detail": "No matches across 14 sanctions lists (stubbed)"})
+
+    # 7. EPF / ESIC (random-ish warn for color)
+    if c.get("tan"):
+        checks.append({"name": "EPF / ESIC compliance", "status": "Pass", "tone": "emerald",
+                       "detail": f"TAN {c['tan']} · last ECR filing OK (stub)"})
+    else:
+        checks.append({"name": "EPF / ESIC compliance", "status": "Warn", "tone": "amber",
+                       "detail": "TAN not provided — manual confirmation needed"})
+
+    # 8. Doc expiries
+    expiring = [d for d in (v.get("documents") or []) if d.get("expiry_date")]
+    if expiring:
+        checks.append({"name": "Certificate validity", "status": "Warn", "tone": "amber",
+                       "detail": f"{len(expiring)} document(s) have expiry tracking — see Expiring docs panel"})
+    else:
+        checks.append({"name": "Certificate validity", "status": "Pass", "tone": "emerald",
+                       "detail": "No time-limited documents uploaded"})
+    return checks
+
+@api.get("/compliance/{vendor_id}")
+async def get_compliance(vendor_id: str, user: dict = Depends(get_current_user)):
+    v = await db.vendors.find_one({"vendor_id": vendor_id}, {"_id": 0})
+    if not v:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    if user["role"] == "vendor" and v["owner_user_id"] != user["user_id"]:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    # Return cached if recent (< 1 hour), else recompute
+    cached = await db.compliance_dossiers.find_one({"vendor_id": vendor_id}, {"_id": 0})
+    if cached:
+        ts = cached.get("ran_at")
+        if isinstance(ts, str):
+            ts = datetime.fromisoformat(ts)
+        if ts and (now_utc() - ts.replace(tzinfo=timezone.utc) if ts.tzinfo is None else now_utc() - ts).total_seconds() < 3600:
+            return cached
+    checks = _stub_compliance_checks(v)
+    doc = {
+        "vendor_id": vendor_id,
+        "vendor_code": v.get("vendor_code"),
+        "legal_name": (v.get("general") or {}).get("legal_name"),
+        "checks": checks,
+        "ran_at": now_utc(),
+        "last_run_ago": "now",
+    }
+    await db.compliance_dossiers.update_one({"vendor_id": vendor_id}, {"$set": doc}, upsert=True)
+    return {k: v for k, v in doc.items() if k != "_id"}
+
+@api.post("/compliance/{vendor_id}/run")
+async def run_compliance(vendor_id: str, user: dict = Depends(require_role("reviewer", "approver", "admin"))):
+    v = await db.vendors.find_one({"vendor_id": vendor_id}, {"_id": 0})
+    if not v:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    checks = _stub_compliance_checks(v)
+    doc = {
+        "vendor_id": vendor_id,
+        "vendor_code": v.get("vendor_code"),
+        "legal_name": (v.get("general") or {}).get("legal_name"),
+        "checks": checks,
+        "ran_at": now_utc(),
+        "last_run_ago": "now",
+    }
+    await db.compliance_dossiers.update_one({"vendor_id": vendor_id}, {"$set": doc}, upsert=True)
+    return {k: v for k, v in doc.items() if k != "_id"}
+
+# ---- Settings: change password & notification prefs ----
+class ChangePasswordIn(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=6)
+
+@api.post("/auth/change-password")
+async def change_password(body: ChangePasswordIn, user: dict = Depends(get_current_user)):
+    full = await db.users.find_one({"user_id": user["user_id"]})
+    if not full or not verify_password(body.current_password, full.get("password_hash", "")):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"password_hash": hash_password(body.new_password)}}
+    )
+    return {"ok": True}
+
+class NotificationPrefsIn(BaseModel):
+    in_app: bool = True
+    email_workflow: bool = False
+    email_sla: bool = False
+
+@api.post("/auth/notification-prefs")
+async def save_notification_prefs(body: NotificationPrefsIn, user: dict = Depends(get_current_user)):
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"notification_prefs": body.model_dump()}}
+    )
+    return {"ok": True}
+
+# ---------------------------------------------------------------------------
+# Iter 4 — Purchase Orders + Goods Receipt Notes (PO & GRN)
+# ---------------------------------------------------------------------------
+class POLineIn(BaseModel):
+    sku: str
+    description: str
+    qty: float
+    unit_price: float
+    uom: str = "EA"
+
+class POIn(BaseModel):
+    vendor_id: str
+    buyer: str
+    plant: str
+    po_date: Optional[str] = None
+    lines: List[POLineIn]
+
+class GRNIn(BaseModel):
+    po_id: str
+    received_at: Optional[str] = None
+    lines: List[dict]  # [{sku, qty_received, qty_rejected, note}]
+    inspection_note: Optional[str] = None
+
+def _po_status(po: dict) -> str:
+    received = sum(g.get("qty_received", 0) for g in (po.get("grn_history") or []))
+    ordered = sum(l["qty"] for l in po["lines"])
+    if received == 0:
+        return "Open"
+    if received < ordered:
+        return "Partial"
+    return "Delivered"
+
+def _po_total(po: dict) -> float:
+    return sum(l["qty"] * l["unit_price"] for l in po["lines"])
+
+async def _seed_pos_if_empty():
+    if await db.purchase_orders.count_documents({}) > 0:
+        return
+    vendor_ids = []
+    async for v in db.vendors.find({"status": "approved"}, {"vendor_id": 1, "general.legal_name": 1}).limit(5):
+        vendor_ids.append((v["vendor_id"], (v.get("general") or {}).get("legal_name") or "Vendor"))
+    if not vendor_ids:
+        # Use first available vendor regardless of status as fallback
+        async for v in db.vendors.find({}, {"vendor_id": 1, "general.legal_name": 1}).limit(5):
+            vendor_ids.append((v["vendor_id"], (v.get("general") or {}).get("legal_name") or "Vendor"))
+    if not vendor_ids:
+        return
+
+    samples = [
+        {"buyer": "Plant 2 · Pune",       "plant": "PUN-2",  "lines": [
+            {"sku": "BRG-6204", "description": "Deep groove bearing 6204",     "qty": 50,  "unit_price": 320,  "uom": "EA"},
+            {"sku": "GSK-A12",  "description": "Industrial gasket A12",         "qty": 80,  "unit_price": 145,  "uom": "EA"},
+        ]},
+        {"buyer": "Plant 1 · Pune",       "plant": "PUN-1",  "lines": [
+            {"sku": "FLG-F32",  "description": "Forged flange F32 — 4 inch",    "qty": 30,  "unit_price": 12400, "uom": "EA"},
+            {"sku": "FLG-F40",  "description": "Forged flange F40 — 6 inch",    "qty": 24,  "unit_price": 18900, "uom": "EA"},
+        ]},
+        {"buyer": "Plant 2 · Pune",       "plant": "PUN-2",  "lines": [
+            {"sku": "KIT-S04",  "description": "Maintenance spare kit S04",     "qty": 18,  "unit_price": 3760,  "uom": "KIT"},
+        ]},
+        {"buyer": "R&D · Bengaluru",      "plant": "BLR-RD", "lines": [
+            {"sku": "PRT-H17",  "description": "Prototype housing H17 (CAD-N)", "qty": 1,   "unit_price": 412300, "uom": "EA"},
+        ]},
+        {"buyer": "Plant 1 · Pune",       "plant": "PUN-1",  "lines": [
+            {"sku": "SCR-M10",  "description": "Hex bolt M10 x 60 zinc plated", "qty": 1200,"unit_price": 18,    "uom": "EA"},
+            {"sku": "NUT-M10",  "description": "Hex nut M10 zinc plated",       "qty": 1200,"unit_price": 9,     "uom": "EA"},
+        ]},
+    ]
+    now = now_utc()
+    for i, s in enumerate(samples):
+        vid, vname = vendor_ids[i % len(vendor_ids)]
+        po_no = f"PO-26-0{4881 - i*23}"
+        await db.purchase_orders.insert_one({
+            "po_id": f"po_{uuid.uuid4().hex[:10]}",
+            "po_number": po_no,
+            "vendor_id": vid,
+            "vendor_name": vname,
+            "buyer": s["buyer"],
+            "plant": s["plant"],
+            "po_date": (now - timedelta(days=2 + i*3)).isoformat(),
+            "lines": s["lines"],
+            "grn_history": [],
+            "status": "Open",
+            "created_at": now,
+        })
+
+@api.get("/purchase-orders")
+async def list_pos(vendor_id: Optional[str] = None, user: dict = Depends(get_current_user)):
+    await _seed_pos_if_empty()
+    q = {}
+    if user["role"] == "vendor":
+        # vendors only see POs for their own vendor record
+        mine = await db.vendors.find_one({"owner_user_id": user["user_id"]}, {"vendor_id": 1})
+        if not mine:
+            return []
+        q["vendor_id"] = mine["vendor_id"]
+    elif vendor_id:
+        q["vendor_id"] = vendor_id
+    out = []
+    cursor = db.purchase_orders.find(q, {"_id": 0}).sort("po_date", -1).limit(200)
+    async for po in cursor:
+        po["status"] = _po_status(po)
+        po["total_amount"] = _po_total(po)
+        po["line_count"] = len(po["lines"])
+        out.append(po)
+    return out
+
+@api.post("/purchase-orders")
+async def create_po(body: POIn, user: dict = Depends(require_role("admin", "reviewer", "approver"))):
+    v = await db.vendors.find_one({"vendor_id": body.vendor_id}, {"general.legal_name": 1})
+    if not v:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    next_num = await db.purchase_orders.count_documents({}) + 4900
+    po = {
+        "po_id": f"po_{uuid.uuid4().hex[:10]}",
+        "po_number": f"PO-26-{next_num:05d}",
+        "vendor_id": body.vendor_id,
+        "vendor_name": (v.get("general") or {}).get("legal_name"),
+        "buyer": body.buyer,
+        "plant": body.plant,
+        "po_date": body.po_date or now_utc().isoformat(),
+        "lines": [l.model_dump() for l in body.lines],
+        "grn_history": [],
+        "status": "Open",
+        "created_at": now_utc(),
+        "created_by": user["user_id"],
+    }
+    await db.purchase_orders.insert_one(po)
+    po["total_amount"] = _po_total(po)
+    po["line_count"] = len(po["lines"])
+    po.pop("_id", None)
+    return po
+
+@api.get("/purchase-orders/{po_id}")
+async def get_po(po_id: str, user: dict = Depends(get_current_user)):
+    po = await db.purchase_orders.find_one({"po_id": po_id}, {"_id": 0})
+    if not po:
+        raise HTTPException(status_code=404, detail="PO not found")
+    if user["role"] == "vendor":
+        mine = await db.vendors.find_one({"owner_user_id": user["user_id"]}, {"vendor_id": 1})
+        if not mine or po["vendor_id"] != mine["vendor_id"]:
+            raise HTTPException(status_code=403, detail="Forbidden")
+    po["status"] = _po_status(po)
+    po["total_amount"] = _po_total(po)
+    return po
+
+# ---- GRNs ----
+async def _seed_grns_if_empty():
+    if await db.grns.count_documents({}) > 0:
+        return
+    pos = []
+    async for p in db.purchase_orders.find({}).limit(3):
+        pos.append(p)
+    if not pos:
+        return
+    samples = [
+        {"po_idx": 0, "qty_received": 82, "qty_rejected": 8, "note": "8 units rejected — surface finish", "tone": "rose",    "status": "Action needed"},
+        {"po_idx": 1, "qty_received": 100, "qty_rejected": 0, "note": "Accepted in full",                  "tone": "emerald", "status": "Closed"},
+        {"po_idx": 2, "qty_received": 60, "qty_rejected": 0, "note": "Accepted in full",                  "tone": "emerald", "status": "Closed"},
+        {"po_idx": 0, "qty_received": 48, "qty_rejected": 2, "note": "2 units pending replacement",       "tone": "amber",   "status": "Awaiting vendor"},
+    ]
+    now = now_utc()
+    for i, s in enumerate(samples):
+        if s["po_idx"] >= len(pos):
+            continue
+        po = pos[s["po_idx"]]
+        await db.grns.insert_one({
+            "grn_id": f"grn_{uuid.uuid4().hex[:10]}",
+            "grn_number": f"GRN-26-{1188 - i*4:04d}",
+            "po_id": po["po_id"],
+            "po_number": po["po_number"],
+            "vendor_id": po["vendor_id"],
+            "vendor_name": po.get("vendor_name"),
+            "received_at": (now - timedelta(days=2 + i)).isoformat(),
+            "qty_received": s["qty_received"],
+            "qty_rejected": s["qty_rejected"],
+            "qty_ordered": sum(l["qty"] for l in po["lines"]),
+            "inspection_note": s["note"],
+            "status": s["status"],
+            "tone": s["tone"],
+            "vendor_acknowledged": s["status"] == "Closed",
+            "created_at": now,
+        })
+
+@api.get("/grns")
+async def list_grns(po_id: Optional[str] = None, user: dict = Depends(get_current_user)):
+    await _seed_grns_if_empty()
+    q = {}
+    if po_id:
+        q["po_id"] = po_id
+    if user["role"] == "vendor":
+        mine = await db.vendors.find_one({"owner_user_id": user["user_id"]}, {"vendor_id": 1})
+        if not mine:
+            return []
+        q["vendor_id"] = mine["vendor_id"]
+    cursor = db.grns.find(q, {"_id": 0}).sort("received_at", -1).limit(200)
+    return [g async for g in cursor]
+
+@api.post("/grns")
+async def create_grn(body: GRNIn, user: dict = Depends(require_role("admin", "reviewer", "approver"))):
+    po = await db.purchase_orders.find_one({"po_id": body.po_id})
+    if not po:
+        raise HTTPException(status_code=404, detail="PO not found")
+    qty_received = sum(l.get("qty_received", 0) for l in body.lines)
+    qty_rejected = sum(l.get("qty_rejected", 0) for l in body.lines)
+    qty_ordered = sum(l["qty"] for l in po["lines"])
+    next_num = await db.grns.count_documents({}) + 1200
+    grn = {
+        "grn_id": f"grn_{uuid.uuid4().hex[:10]}",
+        "grn_number": f"GRN-26-{next_num:04d}",
+        "po_id": body.po_id,
+        "po_number": po["po_number"],
+        "vendor_id": po["vendor_id"],
+        "vendor_name": po.get("vendor_name"),
+        "received_at": body.received_at or now_utc().isoformat(),
+        "qty_received": qty_received,
+        "qty_rejected": qty_rejected,
+        "qty_ordered": qty_ordered,
+        "inspection_note": body.inspection_note or "Accepted",
+        "status": "Closed" if qty_rejected == 0 else "Action needed",
+        "tone": "emerald" if qty_rejected == 0 else "rose",
+        "vendor_acknowledged": False,
+        "lines": body.lines,
+        "created_at": now_utc(),
+        "created_by": user["user_id"],
+    }
+    await db.grns.insert_one(grn)
+    # Update PO grn_history
+    await db.purchase_orders.update_one(
+        {"po_id": body.po_id},
+        {"$push": {"grn_history": {"grn_id": grn["grn_id"], "qty_received": qty_received, "received_at": grn["received_at"]}}}
+    )
+    grn.pop("_id", None)
+    return grn
+
+@api.post("/grns/{grn_id}/acknowledge")
+async def acknowledge_grn(grn_id: str, user: dict = Depends(get_current_user)):
+    res = await db.grns.update_one(
+        {"grn_id": grn_id},
+        {"$set": {"vendor_acknowledged": True, "acknowledged_at": now_utc(), "acknowledged_by": user["user_id"]}}
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="GRN not found")
+    return {"ok": True}
+
+@api.get("/operations/stats")
+async def operations_stats(user: dict = Depends(get_current_user)):
+    await _seed_pos_if_empty()
+    await _seed_grns_if_empty()
+    q = {}
+    if user["role"] == "vendor":
+        mine = await db.vendors.find_one({"owner_user_id": user["user_id"]}, {"vendor_id": 1})
+        if not mine:
+            return {"open_pos": 0, "pending_grns": 0, "on_time_pct": 0, "rejection_pct": 0}
+        q["vendor_id"] = mine["vendor_id"]
+    open_pos = 0
+    async for p in db.purchase_orders.find(q):
+        if _po_status(p) in ("Open", "Partial"):
+            open_pos += 1
+    pending_grns = await db.grns.count_documents({**q, "vendor_acknowledged": False})
+    total_recv = 0
+    total_rej = 0
+    async for g in db.grns.find(q):
+        total_recv += g.get("qty_received", 0)
+        total_rej += g.get("qty_rejected", 0)
+    rejection_pct = round((total_rej / total_recv * 100), 1) if total_recv > 0 else 0
+    return {
+        "open_pos": open_pos,
+        "pending_grns": pending_grns,
+        "on_time_pct": 98.2,  # Placeholder until shipment date tracking added
+        "rejection_pct": rejection_pct,
+    }
+
+# ---------------------------------------------------------------------------
+# Iter 5 — Finance Admin: Invoice Automation + 3-way match + AI OCR
+# ---------------------------------------------------------------------------
+class InvoiceLineIn(BaseModel):
+    sku: Optional[str] = None
+    description: str
+    qty: float
+    unit_price: float
+    line_total: float
+
+class InvoiceIn(BaseModel):
+    invoice_number: str
+    vendor_id: str
+    po_id: Optional[str] = None
+    grn_id: Optional[str] = None
+    invoice_date: Optional[str] = None
+    due_date: Optional[str] = None
+    payment_terms: Optional[str] = "Net 30"
+    currency: str = "INR"
+    subtotal: float
+    tax_amount: float = 0
+    tds_amount: float = 0
+    total_amount: float
+    lines: List[InvoiceLineIn] = []
+    irn: Optional[str] = None  # e-Invoice IRN
+
+def _3way_match(invoice: dict, po: Optional[dict], grn: Optional[dict]) -> dict:
+    """3-way match engine: PO ↔ GRN ↔ Invoice. Returns verdict + confidence + flags."""
+    flags = []
+    score = 0
+    total = 0
+
+    # Check 1: PO existence
+    total += 1
+    if po:
+        score += 1
+    else:
+        flags.append({"severity": "block", "code": "NO_PO", "msg": "No matching PO found"})
+
+    # Check 2: GRN existence
+    total += 1
+    if grn:
+        score += 1
+    elif po:
+        flags.append({"severity": "block", "code": "NO_GRN", "msg": "GRN missing — goods not received"})
+
+    # Check 3: Vendor matches
+    if po:
+        total += 1
+        if po["vendor_id"] == invoice["vendor_id"]:
+            score += 1
+        else:
+            flags.append({"severity": "block", "code": "VENDOR_MISMATCH", "msg": "Invoice vendor != PO vendor"})
+
+    # Check 4: Amount tolerance (5%)
+    if po:
+        total += 1
+        po_total = sum(l["qty"] * l["unit_price"] for l in po["lines"])
+        diff_pct = abs(invoice["subtotal"] - po_total) / po_total * 100 if po_total > 0 else 100
+        if diff_pct <= 5:
+            score += 1
+        elif diff_pct <= 10:
+            score += 0.5
+            flags.append({"severity": "warn", "code": "AMOUNT_VAR", "msg": f"Amount variance {diff_pct:.1f}% (>5% tolerance)"})
+        else:
+            flags.append({"severity": "block", "code": "AMOUNT_VAR", "msg": f"Amount variance {diff_pct:.1f}%"})
+
+    # Check 5: Quantity match
+    if po and grn:
+        total += 1
+        qty_invoiced = sum(l["qty"] for l in invoice.get("lines", []))
+        if grn.get("qty_received") and qty_invoiced > 0:
+            diff = abs(qty_invoiced - grn["qty_received"]) / grn["qty_received"] * 100
+            if diff <= 2:
+                score += 1
+            else:
+                flags.append({"severity": "warn", "code": "QTY_MISMATCH", "msg": f"Qty mismatch: {qty_invoiced} invoiced vs {grn['qty_received']} received"})
+
+    # Check 6: Date sanity
+    total += 1
+    if invoice.get("invoice_date") and po and po.get("po_date"):
+        try:
+            inv_d = datetime.fromisoformat(invoice["invoice_date"].replace("Z", "+00:00"))
+            po_d = datetime.fromisoformat(po["po_date"].replace("Z", "+00:00"))
+            if inv_d >= po_d:
+                score += 1
+            else:
+                flags.append({"severity": "warn", "code": "DATE_PRE_PO", "msg": "Invoice dated before PO"})
+        except (ValueError, AttributeError):
+            score += 1
+    else:
+        score += 1
+
+    confidence = round(score / total * 100, 1) if total > 0 else 0
+    has_block = any(f["severity"] == "block" for f in flags)
+
+    if has_block:
+        verdict = "blocked"
+        match_label = flags[0]["msg"] if flags else "Blocked"
+        tone = "rose"
+    elif any(f["severity"] == "warn" for f in flags):
+        verdict = "held"
+        match_label = flags[0]["msg"]
+        tone = "amber"
+    else:
+        verdict = "auto_approved"
+        match_label = "3-way ✓"
+        tone = "emerald"
+
+    return {
+        "verdict": verdict,
+        "confidence": confidence,
+        "match_label": match_label,
+        "tone": tone,
+        "flags": flags,
+        "score": score,
+        "total_checks": total,
+    }
+
+async def _seed_invoices_if_empty():
+    if await db.invoices.count_documents({}) > 0:
+        return
+    pos = []
+    async for p in db.purchase_orders.find({}).limit(5):
+        pos.append(p)
+    grns = {}
+    async for g in db.grns.find({}):
+        grns[g["po_id"]] = g
+    if not pos:
+        return
+
+    samples = [
+        {"po_idx": 0, "tds_rate": 0.02, "amount_factor": 1.0},   # 3-way OK
+        {"po_idx": 1, "tds_rate": 0.02, "amount_factor": 1.08},  # qty/amount variance
+        {"po_idx": 2, "tds_rate": 0.02, "amount_factor": 1.0},   # 3-way OK
+        {"po_idx": 3, "tds_rate": 0.02, "amount_factor": 1.0, "skip_grn": True},  # GRN missing
+        {"po_idx": 4, "tds_rate": 0.02, "amount_factor": 1.0},   # 3-way OK
+    ]
+    now = now_utc()
+    for i, s in enumerate(samples):
+        if s["po_idx"] >= len(pos):
+            continue
+        po = pos[s["po_idx"]]
+        subtotal = sum(l["qty"] * l["unit_price"] for l in po["lines"]) * s["amount_factor"]
+        tax = subtotal * 0.18
+        tds = subtotal * s["tds_rate"]
+        total = subtotal + tax
+        grn = grns.get(po["po_id"]) if not s.get("skip_grn") else None
+
+        inv = {
+            "invoice_id": f"inv_{uuid.uuid4().hex[:10]}",
+            "invoice_number": f"INV/26-27/{102 - i*1:04d}",
+            "vendor_id": po["vendor_id"],
+            "vendor_name": po.get("vendor_name"),
+            "po_id": po["po_id"],
+            "po_number": po["po_number"],
+            "grn_id": grn["grn_id"] if grn else None,
+            "grn_number": grn["grn_number"] if grn else None,
+            "invoice_date": (now - timedelta(days=i)).isoformat(),
+            "due_date": (now + timedelta(days=30 - i*2)).isoformat(),
+            "payment_terms": "Net 30" if i % 2 == 0 else "Net 45",
+            "currency": "INR",
+            "subtotal": round(subtotal, 2),
+            "tax_amount": round(tax, 2),
+            "tds_amount": round(tds, 2),
+            "total_amount": round(total, 2),
+            "lines": [{"sku": l.get("sku"), "description": l["description"], "qty": l["qty"], "unit_price": l["unit_price"] * s["amount_factor"], "line_total": l["qty"] * l["unit_price"] * s["amount_factor"]} for l in po["lines"]],
+            "irn": f"a1{uuid.uuid4().hex[:38]}".lower(),
+            "uploaded_at": now,
+            "uploaded_by": "system_seed",
+            "match_result": _3way_match({"vendor_id": po["vendor_id"], "subtotal": subtotal, "invoice_date": (now - timedelta(days=i)).isoformat(), "lines": [{"qty": l["qty"]} for l in po["lines"]]}, po, grn),
+        }
+        # Status from verdict
+        inv["status"] = inv["match_result"]["verdict"]
+        await db.invoices.insert_one(inv)
+
+@api.get("/invoices")
+async def list_invoices(user: dict = Depends(get_current_user)):
+    await _seed_invoices_if_empty()
+    q = {}
+    if user["role"] == "vendor":
+        mine = await db.vendors.find_one({"owner_user_id": user["user_id"]}, {"vendor_id": 1})
+        if not mine:
+            return []
+        q["vendor_id"] = mine["vendor_id"]
+    cursor = db.invoices.find(q, {"_id": 0}).sort("uploaded_at", -1).limit(200)
+    return [inv async for inv in cursor]
+
+@api.post("/invoices")
+async def create_invoice(body: InvoiceIn, user: dict = Depends(require_role("admin", "reviewer", "approver"))):
+    po = None
+    grn = None
+    if body.po_id:
+        po = await db.purchase_orders.find_one({"po_id": body.po_id})
+    if body.grn_id:
+        grn = await db.grns.find_one({"grn_id": body.grn_id})
+
+    match = _3way_match(body.model_dump(), po, grn)
+    inv = {
+        "invoice_id": f"inv_{uuid.uuid4().hex[:10]}",
+        **body.model_dump(),
+        "vendor_name": (po or {}).get("vendor_name") if po else None,
+        "po_number": (po or {}).get("po_number"),
+        "grn_number": (grn or {}).get("grn_number"),
+        "uploaded_at": now_utc(),
+        "uploaded_by": user["user_id"],
+        "match_result": match,
+        "status": match["verdict"],
+    }
+    await db.invoices.insert_one(inv)
+    inv.pop("_id", None)
+    return inv
+
+@api.post("/invoices/{invoice_id}/rerun-match")
+async def rerun_match(invoice_id: str, user: dict = Depends(require_role("admin", "reviewer", "approver"))):
+    inv = await db.invoices.find_one({"invoice_id": invoice_id})
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    po = await db.purchase_orders.find_one({"po_id": inv.get("po_id")}) if inv.get("po_id") else None
+    grn = await db.grns.find_one({"grn_id": inv.get("grn_id")}) if inv.get("grn_id") else None
+    match = _3way_match(inv, po, grn)
+    await db.invoices.update_one(
+        {"invoice_id": invoice_id},
+        {"$set": {"match_result": match, "status": match["verdict"], "match_run_at": now_utc()}}
+    )
+    updated = await db.invoices.find_one({"invoice_id": invoice_id}, {"_id": 0})
+    return updated
+
+@api.post("/invoices/run-bot")
+async def run_bot_on_queue(user: dict = Depends(require_role("admin", "reviewer", "approver"))):
+    """Run the matching bot on all 'held' or 'pending' invoices in the queue."""
+    count = 0
+    async for inv in db.invoices.find({"status": {"$in": ["held", "pending"]}}):
+        po = await db.purchase_orders.find_one({"po_id": inv.get("po_id")}) if inv.get("po_id") else None
+        grn = await db.grns.find_one({"grn_id": inv.get("grn_id")}) if inv.get("grn_id") else None
+        match = _3way_match(inv, po, grn)
+        await db.invoices.update_one(
+            {"invoice_id": inv["invoice_id"]},
+            {"$set": {"match_result": match, "status": match["verdict"], "match_run_at": now_utc()}}
+        )
+        count += 1
+    return {"ok": True, "processed": count}
+
+@api.get("/invoices/stats")
+async def invoice_stats(user: dict = Depends(get_current_user)):
+    await _seed_invoices_if_empty()
+    pipeline = [{"$group": {"_id": "$status", "count": {"$sum": 1}, "total": {"$sum": "$total_amount"}}}]
+    out = {"auto_approved": 0, "held": 0, "blocked": 0, "pending": 0, "scheduled_amount": 0.0}
+    async for row in db.invoices.aggregate(pipeline):
+        sid = row["_id"]
+        if sid in out:
+            out[sid] = row["count"]
+        if sid == "auto_approved":
+            out["scheduled_amount"] += row.get("total", 0)
+    out["ocr_accuracy_pct"] = 98.4  # Demo placeholder
+    out["total_invoices"] = sum([out["auto_approved"], out["held"], out["blocked"], out["pending"]])
+    return out
+
+# ---- Optional: GPT-4o vision invoice OCR (signed Cloudinary URL -> structured data) ----
+class InvoiceOCRIn(BaseModel):
+    image_url: str
+
+@api.post("/invoices/ocr-extract")
+async def invoice_ocr_extract(body: InvoiceOCRIn, user: dict = Depends(require_role("admin", "reviewer", "approver"))):
+    """Extract structured invoice data from an image/PDF URL using GPT-4o vision via Emergent LLM key."""
+    try:
+        from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+    except ImportError:
+        raise HTTPException(status_code=503, detail="OCR integration not available (emergentintegrations missing)")
+    key = os.environ.get("EMERGENT_LLM_KEY")
+    if not key:
+        raise HTTPException(status_code=503, detail="EMERGENT_LLM_KEY not configured")
+    chat = LlmChat(api_key=key, session_id=f"ocr_{uuid.uuid4().hex[:8]}",
+                   system_message="You are an invoice OCR extractor for Indian B2B invoices. Return a JSON object only with keys: invoice_number, vendor_name, gstin, invoice_date (YYYY-MM-DD), subtotal, tax_amount, tds_amount, total_amount, currency, irn, line_items (array of {description, qty, unit_price, line_total}). Use null for missing fields. No prose.").with_model("openai", "gpt-4o-mini")
+    msg = UserMessage(
+        text="Extract invoice fields as JSON. Use INR amounts in numbers (no commas, no ₹ symbol).",
+        file_contents=[ImageContent(image_url=body.image_url)],
+    )
+    try:
+        reply = await chat.send_message(msg)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"OCR failed: {e}")
+    # Try to parse the JSON
+    import json as _json
+    text = reply.strip()
+    if text.startswith("```"):
+        text = text.split("```", 2)[-2] if text.count("```") >= 2 else text
+        if text.startswith("json"):
+            text = text[4:].strip()
+    try:
+        data = _json.loads(text)
+    except _json.JSONDecodeError:
+        data = {"raw_text": reply, "_parse_warning": "Model did not return clean JSON"}
+    return {"ok": True, "extracted": data}
+
 app.include_router(api)

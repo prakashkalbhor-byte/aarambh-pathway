@@ -9,6 +9,12 @@ import VendorOnboarding from "./pages/VendorOnboarding";
 import VendorDetail from "./pages/VendorDetail";
 import VendorList from "./pages/VendorList";
 import AdminUsers from "./pages/AdminUsers";
+import VendorCategories from "./pages/VendorCategories";
+import ComplianceValidation from "./pages/ComplianceValidation";
+import HelpPage from "./pages/HelpPage";
+import SettingsPage from "./pages/SettingsPage";
+import POGRNPage from "./pages/POGRNPage";
+import FinanceAutomation from "./pages/FinanceAutomation";
 import { ToastProvider, useToast } from "./components/Toast";
 
 // -----------------------------------------------------------------------------
@@ -114,6 +120,12 @@ function AppRouter() {
       <Route path="/vendors" element={<Protected roles={["reviewer","approver","sap_team","admin"]}><VendorList /></Protected>} />
       <Route path="/vendors/:vendorId" element={<Protected><VendorDetail /></Protected>} />
       <Route path="/admin/users" element={<Protected roles={["admin"]}><AdminUsers /></Protected>} />
+      <Route path="/admin/categories" element={<Protected roles={["admin"]}><VendorCategories /></Protected>} />
+      <Route path="/compliance" element={<Protected roles={["reviewer", "approver", "admin"]}><ComplianceValidation /></Protected>} />
+      <Route path="/help" element={<Protected><HelpPage /></Protected>} />
+      <Route path="/settings" element={<Protected><SettingsPage /></Protected>} />
+      <Route path="/po-grn" element={<Protected><POGRNPage /></Protected>} />
+      <Route path="/finance" element={<Protected roles={["admin", "approver", "reviewer"]}><FinanceAutomation /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

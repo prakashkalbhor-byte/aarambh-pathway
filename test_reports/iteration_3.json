@@ -1,0 +1,56 @@
+{
+  "summary": "Iter 3/4/5 verification — 23/24 backend pytests pass; all 6 new frontend pages render & integrate correctly. One real backend bug found: /api/invoices/ocr-extract returns 500 (instead of the documented 502) because emergentintegrations' ImageContent class only accepts image_base64, not image_url. Everything else (Categories CRUD with RBAC, Compliance dossier with 8 checks, change-password, notification prefs, POs+GRNs seed/CRUD/ack, operations stats, invoice seed+stats, 3-way match engine for NO_PO/NO_GRN/AMOUNT_VAR/auto_approved verdicts, run-bot, rerun-match) verified end-to-end.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/invoices/ocr-extract",
+        "issue": "Returns HTTP 500 (Internal Server Error) instead of the spec'd 200/502 fallback. RCA: server.py line 1935 calls ImageContent(image_url=body.image_url) but the installed emergentintegrations.llm.chat.ImageContent signature is __init__(self, image_base64: str) — TypeError thrown before the try/except around chat.send_message. Fix: either (a) fetch the URL with httpx, base64-encode the bytes, and pass image_base64=..., or (b) use FileContentWithMimeType / upload helpers from emergentintegrations (recommended — check the integration playbook for the GPT-4o vision pattern). Also recommend wrapping the ImageContent construction inside the same try/except so any mis-call yields 502 instead of 500.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "GET /api/compliance/{vendor_id}",
+        "issue": "Cache freshness check at line 1326 mixes tzinfo handling oddly: `(now_utc() - ts.replace(tzinfo=timezone.utc) if ts.tzinfo is None else now_utc() - ts).total_seconds()`. Works today because mongo returns naive datetime, but if a future migration stores tz-aware datetimes, the else branch will raise. Cleaner: normalise ts to UTC before the subtract."
+      },
+      {
+        "endpoint": "GET /api/invoices/stats",
+        "issue": "scheduled_amount only sums auto_approved invoices but the field name suggests 'scheduled for payment' which usually includes held-but-cleared. Acceptable for demo; document intent."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Global", "issues": ["React Router v6 future-flag warnings still present (v7_startTransition, v7_relativeSplatPath) — same as iter 1/2, non-blocking"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter3_4_5.py",
+    "/app/test_reports/pytest/iteration_3_results.xml"
+  ],
+  "action_items": [
+    "BACKEND CRITICAL: Fix /api/invoices/ocr-extract — switch from ImageContent(image_url=...) (invalid kwarg) to image_base64 by downloading the URL first, OR use the correct helper from emergentintegrations. Also wrap ImageContent() construction inside the try/except so library errors return 502, not 500. Verify via: curl -X POST $BACKEND/api/invoices/ocr-extract -H 'Authorization: Bearer $ADMIN_TOKEN' -d '{\"image_url\":\"https://picsum.photos/300/400\"}'",
+    "OPTIONAL: Consolidate the compliance dossier cache TTL logic into a helper to avoid the inline ternary on tzinfo."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now 1955 lines — past the 700-line threshold. Strongly recommend splitting into routers/ subpackage (auth, vendors, workflow, sap, categories, compliance, po_grn, invoices) before iter 6.",
+    "_3way_match dynamically grows `total` by branch, so confidence percentages aren't comparable across invoices with/without PO (a no-PO invoice maxes out at score=1/total=2 = 50% before flags push it to blocked anyway). Acceptable since verdict is gated by has_block, but the displayed % can mislead users.",
+    "Invoice seed inserts the match_result inline at line 1829 then sets status from it — fine; but the seed passes a *synthetic* invoice dict to _3way_match (only vendor_id/subtotal/invoice_date/lines), so the qty-mismatch branch can't see invoice line qty deviations. That's why agent-context note says seeds won't auto_approve.",
+    "POIn.lines is List[POLineIn] (typed) but GRNIn.lines is List[dict] (untyped) — inconsistency; should be List[GRNLineIn].",
+    "/api/invoices/run-bot reruns ALL held/pending and stores match_run_at but doesn't return a list of changed invoice_ids — caller has to refetch."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter3_4_5.py (new — 24 cases for iter 3/4/5 + OCR endpoint)",
+    "/app/test_reports/iteration_3.json (new)",
+    "/app/test_reports/pytest/iteration_3_results.xml (new)"
+  ],
+  "success_rate": {"backend": "95.8% (23/24 — only OCR endpoint fails)", "frontend": "100% on all six smoke flows (categories CRUD + dialog, compliance rerun, help page, settings 3 sections, po-grn ack flow, finance run-bot + ClearTax tab)"},
+  "test_credentials": "Seeded creds from /app/memory/test_credentials.md — admin@keva.com/Admin@123, reviewer@keva.com/Review@123, vendor@test.com/Vendor@123, sap@keva.com/Sap@123. test_change_password_correct_and_revert temporarily mutates sap@keva.com and reverts within the same test.",
+  "seed_data_creation": "A few TEST_UI_fam_* spend families created via the frontend dialog test and TEST_family_*, TEST_fam_* via pytest. Plus 1-3 GRNs and ~4 TEST/INV invoices per backend run. Safe to clean: db.categories.deleteMany({name:/^TEST_/}); db.invoices.deleteMany({invoice_number:/^TEST\\//}); db.grns.deleteMany({inspection_note:/^TEST/}).",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Login testids: login-email-input / login-password-input / login-submit-btn. Iter 3-5 testids verified live: new-category-btn, category-dialog, category-name-input, category-save-btn, del-sub-{id}, compliance-rerun-btn, run-bot-btn. Acknowledge buttons on /po-grn don't have explicit testids — selected via :has-text(\"Acknowledge\"); after click they correctly turn into 'Acked' label. Finance page shows correct toast 'Bot processed N invoice(s)'. The single failing test is TestOCR::test_ocr_returns_ok_or_502 — accepts 200/502/503; backend returns 500. After main agent fixes the ImageContent call, re-run: python -m pytest /app/backend/tests/test_iter3_4_5.py -v",
+  "rca of the issue": "OCR 500 RCA: In /app/backend/server.py:1935, the OCR endpoint constructs ImageContent(image_url=body.image_url). The installed emergentintegrations.llm.chat.ImageContent class only accepts image_base64 (verified: `inspect.signature(ImageContent.__init__) == (self, image_base64: str)`). This raises TypeError before reaching the try/except wrapped around chat.send_message, so FastAPI converts it to a generic 500. Reproduction: POST /api/invoices/ocr-extract {image_url:'https://picsum.photos/300/400'} as admin → returns 500. Mitigation (2 lines): import httpx + base64; fetch the URL, base64-encode and pass image_base64=encoded. Also extend the try/except to cover ImageContent(...) construction so any future SDK change still surfaces as 502."
+}

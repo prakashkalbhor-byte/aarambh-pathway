@@ -3,44 +3,62 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../App";
 import { api } from "../lib/api";
 import { cn } from "../lib/utils";
-import { LayoutDashboard, FileText, Users, LogOut, ClipboardList, Building2, ShieldCheck, Settings, FolderTree, Bell, Search } from "lucide-react";
+import { LayoutDashboard, FileText, Users, LogOut, ClipboardList, Building2, ShieldCheck, Settings, FolderTree, Bell, Search, HelpCircle, Shield, Truck, Sparkles } from "lucide-react";
 import { Pill } from "./ui";
+
+const SHARED_ACCOUNT_GROUP = { group: "ACCOUNT", items: [
+  { to: "/help", label: "Help & resources", icon: HelpCircle, desc: "Guides & FAQs" },
+  { to: "/settings", label: "Settings", icon: Settings, desc: "Profile & prefs" },
+]};
 
 const NAV = {
   vendor: [
     { group: "WORKSPACE", items: [
       { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, desc: "Vendor overview" },
       { to: "/onboarding", label: "My Onboarding", icon: ClipboardList, desc: "Multi-step form" },
+      { to: "/po-grn", label: "PO & GRN", icon: Truck, desc: "Orders & receipts" },
     ]},
+    SHARED_ACCOUNT_GROUP,
   ],
   reviewer: [
     { group: "WORKSPACE", items: [
       { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, desc: "Review overview" },
       { to: "/vendors", label: "Review Queue", icon: FileText, desc: "Pending submissions" },
+      { to: "/compliance", label: "Compliance", icon: Shield, desc: "Risk dossiers" },
+      { to: "/po-grn", label: "PO & GRN", icon: Truck, desc: "Operations" },
     ]},
+    SHARED_ACCOUNT_GROUP,
   ],
   approver: [
     { group: "WORKSPACE", items: [
       { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, desc: "Approval overview" },
       { to: "/vendors", label: "Approval Queue", icon: ShieldCheck, desc: "Awaiting approval" },
+      { to: "/compliance", label: "Compliance", icon: Shield, desc: "Risk dossiers" },
+      { to: "/po-grn", label: "PO & GRN", icon: Truck, desc: "Operations" },
     ]},
+    SHARED_ACCOUNT_GROUP,
   ],
   sap_team: [
     { group: "WORKSPACE", items: [
       { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, desc: "SAP overview" },
       { to: "/vendors", label: "SAP Mapping", icon: Building2, desc: "Company codes" },
+      { to: "/po-grn", label: "PO & GRN", icon: Truck, desc: "Operations" },
     ]},
+    SHARED_ACCOUNT_GROUP,
   ],
   admin: [
     { group: "WORKSPACE", items: [
       { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, desc: "Portal overview" },
       { to: "/vendors", label: "All Vendors", icon: FileText, desc: "Master data" },
+      { to: "/compliance", label: "Compliance", icon: Shield, desc: "Risk dossiers" },
+      { to: "/po-grn", label: "PO & GRN", icon: Truck, desc: "Operations" },
+      { to: "/finance", label: "Finance Admin", icon: Sparkles, desc: "AP · 3-way match" },
       { to: "/admin/users", label: "Users & Roles", icon: Users, desc: "Access control" },
     ]},
     { group: "MORE", items: [
       { to: "/admin/categories", label: "Vendor Categories", icon: FolderTree, desc: "Field master" },
-      { to: "/admin/settings", label: "Settings", icon: Settings, desc: "Portal config" },
     ]},
+    SHARED_ACCOUNT_GROUP,
   ],
 };
 
@@ -132,7 +150,11 @@ const ROUTE_META = {
   "/vendors":        { crumbs: ["Workspace", "Vendors"] },
   "/admin/users":    { crumbs: ["Internal ops", "User management"], badge: "Admin" },
   "/admin/categories": { crumbs: ["Master data", "Vendor categories"] },
-  "/admin/settings": { crumbs: ["Account", "Settings"] },
+  "/compliance":     { crumbs: ["Internal ops", "Compliance review"], badge: "Risk" },
+  "/help":           { crumbs: ["Account", "Help & resources"] },
+  "/settings":       { crumbs: ["Account", "Settings"] },
+  "/po-grn":         { crumbs: ["Operations", "PO & GRN"], badge: "Live" },
+  "/finance":        { crumbs: ["Internal", "Finance", "Invoice automation"], badge: "Finance admin" },
 };
 
 function getRouteMeta(pathname, user) {
