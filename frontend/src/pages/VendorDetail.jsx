@@ -60,9 +60,13 @@ export default function VendorDetail() {
     e.preventDefault();
     setLoading(true);
     try {
-      const { data } = await api.post(`/vendors/${vendorId}/sap-mapping`, sapForm);
-      setVendor(data);
-      toast.success("SAP mapping created");
+      const { data } = await api.post(`/vendors/${vendorId}/sap-push`, {
+        company_code: sapForm.company_code,
+        account_group: sapForm.account_group,
+        payment_terms: sapForm.payment_terms,
+      });
+      setVendor(data.vendor);
+      toast.success(`Pushed to SAP — ${data.result?.sap_vendor_code || "OK"}`);
     } catch (err) {
       toast.error(formatApiError(err));
     } finally { setLoading(false); }
@@ -76,7 +80,7 @@ export default function VendorDetail() {
 
   return (
     <AppShell>
-      <div className="max-w-6xl mx-auto">
+      <div className="px-6 lg:px-8 py-6 lg:py-8 max-w-6xl mx-auto">
         <button onClick={() => navigate(-1)} className="flex items-center gap-1.5 text-sm text-slate-600 hover:text-slate-900 mb-4" data-testid="back-link">
           <ArrowLeft className="w-4 h-4" /> Back
         </button>

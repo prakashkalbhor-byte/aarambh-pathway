@@ -6,6 +6,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import os
+import re
+import io
 import uuid
 import time
 import secrets
@@ -15,11 +17,13 @@ import httpx
 import cloudinary
 import cloudinary.utils
 import cloudinary.uploader
+import openpyxl
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Literal
 from fastapi import FastAPI, HTTPException, Request, Response, Depends, Query, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, EmailStr, Field
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # ---------------------------------------------------------------------------
@@ -184,6 +188,49 @@ def require_role(*roles: str):
     return checker
 
 # ---------------------------------------------------------------------------
+# Validation helpers (Indian regulatory regex)
+# ---------------------------------------------------------------------------
+GSTIN_RE = re.compile(r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$")
+PAN_RE = re.compile(r"^[A-Z]{5}[0-9]{4}[A-Z]{1}$")
+TAN_RE = re.compile(r"^[A-Z]{4}[0-9]{5}[A-Z]{1}$")
+IFSC_RE = re.compile(r"^[A-Z]{4}0[A-Z0-9]{6}$")
+PINCODE_RE = re.compile(r"^[1-9][0-9]{5}$")
+SWIFT_RE = re.compile(r"^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$")
+ALLOWED_COMPANY_CODES = {"1000", "3000", "5000"}
+ALLOWED_ACCT_GROUPS = {"KRED", "LIEF", "ZVEN"}
+
+def _bad(field: str, msg: str) -> HTTPException:
+    return HTTPException(status_code=400, detail=f"{field}: {msg}")
+
+def validate_compliance(c: dict, vendor_type: str):
+    if c.get("gstin"):
+        if not GSTIN_RE.match(c["gstin"]):
+            raise _bad("GSTIN", "must match 22ABCDE1234F1Z5 format")
+    if c.get("pan"):
+        if not PAN_RE.match(c["pan"]):
+            raise _bad("PAN", "must match ABCDE1234F format")
+    if c.get("tan"):
+        if not TAN_RE.match(c["tan"]):
+            raise _bad("TAN", "must match MUMA12345B format")
+    # MSME category enforcement
+    if vendor_type == "msme" and not c.get("msme_number"):
+        raise _bad("MSME", "MSME number is required for msme vendor type")
+
+def validate_bank(b: dict, vendor_type: str):
+    if b.get("ifsc_code"):
+        if not IFSC_RE.match(b["ifsc_code"]):
+            raise _bad("IFSC", "must match HDFC0001234 format (11 chars, 5th digit = 0)")
+    if b.get("swift_code"):
+        if not SWIFT_RE.match(b["swift_code"]):
+            raise _bad("SWIFT", "must be 8 or 11 alphanumeric characters")
+    if vendor_type == "foreign" and not b.get("swift_code"):
+        raise _bad("SWIFT", "SWIFT code is required for foreign vendors")
+
+def validate_general(g: dict):
+    if g.get("pincode") and not PINCODE_RE.match(g["pincode"]):
+        raise _bad("Pincode", "must be 6 digits, first digit 1-9")
+
+# ---------------------------------------------------------------------------
 # Schemas
 # ---------------------------------------------------------------------------
 class RegisterIn(BaseModel):
@@ -260,6 +307,20 @@ class SapMappingIn(BaseModel):
     payment_terms: str = "NT30"
     sap_vendor_code: Optional[str] = None
 
+    @field_validator("company_code")
+    @classmethod
+    def _cc(cls, v):
+        if v not in ALLOWED_COMPANY_CODES:
+            raise ValueError(f"company_code must be one of {sorted(ALLOWED_COMPANY_CODES)}")
+        return v
+
+    @field_validator("account_group")
+    @classmethod
+    def _ag(cls, v):
+        if v.upper() not in ALLOWED_ACCT_GROUPS:
+            raise ValueError(f"account_group must be one of {sorted(ALLOWED_ACCT_GROUPS)}")
+        return v.upper()
+
 class DocumentMetaIn(BaseModel):
     document_type: str
     file_name: str
@@ -281,6 +342,10 @@ async def startup():
     await db.vendors.create_index("status")
     await db.user_sessions.create_index("session_token", unique=True)
     await db.login_attempts.create_index("identifier")
+    await db.notifications.create_index("user_id")
+    await db.notifications.create_index("created_at")
+    await db.sap_outbox.create_index("vendor_id")
+    await db.sap_outbox.create_index("status")
 
     seed = [
         ("admin@keva.com", "Admin@123", "System Admin", "admin"),
@@ -509,6 +574,15 @@ async def update_vendor(vendor_id: str, body: VendorPatchIn, user: dict = Depend
         if v["status"] not in ("draft", "on_hold"):
             raise HTTPException(status_code=400, detail="Cannot edit after submission")
 
+    # P0: regex validation
+    vendor_type = body.vendor_type or v.get("vendor_type") or "domestic"
+    if body.general:
+        validate_general(body.general.model_dump())
+    if body.compliance:
+        validate_compliance(body.compliance.model_dump(), vendor_type)
+    if body.bank:
+        validate_bank(body.bank.model_dump(), vendor_type)
+
     updates = {"updated_at": now_utc()}
     if body.vendor_type:
         updates["vendor_type"] = body.vendor_type
@@ -534,8 +608,28 @@ async def submit_vendor(vendor_id: str, user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Forbidden")
     if v["status"] not in ("draft", "on_hold"):
         raise HTTPException(status_code=400, detail=f"Cannot submit from status {v['status']}")
-    if not v.get("general") or not v.get("compliance") or not v.get("bank"):
-        raise HTTPException(status_code=400, detail="Complete all required sections before submitting")
+
+    # P0: stricter pre-submit checks
+    c = v.get("compliance") or {}
+    b = v.get("bank") or {}
+    g = v.get("general") or {}
+    if not g.get("legal_name"):
+        raise _bad("General", "legal_name is required")
+    if not c.get("pan"):
+        raise _bad("Compliance", "PAN is required to submit")
+    if not b.get("account_number") or not b.get("ifsc_code"):
+        raise _bad("Bank", "account_number and IFSC are required to submit")
+    validate_general(g)
+    validate_compliance(c, v.get("vendor_type", "domestic"))
+    validate_bank(b, v.get("vendor_type", "domestic"))
+    # Required documents
+    required_docs = {"pan_card", "cancelled_cheque"}
+    if c.get("gstin"):
+        required_docs.add("gstin_certificate")
+    uploaded_types = {d["document_type"] for d in (v.get("documents") or [])}
+    missing = required_docs - uploaded_types
+    if missing:
+        raise _bad("Documents", f"missing required: {', '.join(sorted(missing))}")
 
     wf = {
         "action": "submitted",
@@ -551,6 +645,9 @@ async def submit_vendor(vendor_id: str, user: dict = Depends(get_current_user)):
         {"$set": {"status": "submitted", "submitted_at": now_utc(), "updated_at": now_utc()},
          "$push": {"workflow": wf}},
     )
+    # Notify reviewers
+    await _notify_role("reviewer", title=f"New vendor submitted: {g.get('legal_name','—')}",
+                       body=f"Vendor {vendor_id} is awaiting review", vendor_id=vendor_id)
     v = await db.vendors.find_one({"vendor_id": vendor_id}, {"_id": 0})
     return vendor_public(v)
 
@@ -599,11 +696,22 @@ async def workflow_action(vendor_id: str, body: WorkflowActionIn, user: dict = D
         {"vendor_id": vendor_id},
         {"$set": set_doc, "$push": {"workflow": wf}}
     )
+    # P1: notify owner + next-stage role
+    owner_id = v.get("owner_user_id")
+    name = (v.get("general") or {}).get("legal_name") or "your vendor record"
+    if owner_id:
+        if new_status == "approved":
+            await _notify_user(owner_id, "Vendor approved", f"{name} has been approved.", vendor_id)
+        elif new_status == "rejected":
+            await _notify_user(owner_id, "Vendor rejected", body.remarks or f"{name} was rejected.", vendor_id)
+        elif new_status == "on_hold":
+            await _notify_user(owner_id, "Revision requested", body.remarks or "Reviewer requested changes.", vendor_id)
+    if new_status == "under_review":
+        await _notify_role("approver", "Vendor ready for approval", f"{name} passed first review.", vendor_id)
+    elif new_status == "approved":
+        await _notify_role("sap_team", "Vendor approved — SAP push ready", f"{name} awaits company-code mapping.", vendor_id)
     v = await db.vendors.find_one({"vendor_id": vendor_id}, {"_id": 0})
     return vendor_public(v)
-
-# ---------------------------------------------------------------------------
-# SAP mapping
 # ---------------------------------------------------------------------------
 @api.post("/vendors/{vendor_id}/sap-mapping")
 async def add_sap_mapping(vendor_id: str, body: SapMappingIn, user: dict = Depends(require_role("sap_team", "admin"))):
@@ -759,5 +867,262 @@ async def stats(user: dict = Depends(get_current_user)):
             out[row["_id"]] = row["count"]
     out["total"] = sum(out.values())
     return out
+
+# ---------------------------------------------------------------------------
+# Notifications, SLA, SAP outbox, Excel export, Entity scoping (P1 + P2)
+# ---------------------------------------------------------------------------
+async def _notify_user(user_id: str, title: str, body: str = "", vendor_id: Optional[str] = None):
+    await db.notifications.insert_one({
+        "id": f"ntf_{uuid.uuid4().hex[:10]}",
+        "user_id": user_id,
+        "title": title,
+        "body": body,
+        "vendor_id": vendor_id,
+        "read": False,
+        "created_at": now_utc(),
+    })
+
+async def _notify_role(role: str, title: str, body: str = "", vendor_id: Optional[str] = None, entity: Optional[str] = None):
+    q = {"role": role, "is_active": True}
+    if entity:
+        q["entity"] = {"$in": [entity, None]}
+    async for u in db.users.find(q, {"user_id": 1}):
+        await _notify_user(u["user_id"], title, body, vendor_id)
+
+def _days_in_status(v: dict) -> Optional[float]:
+    wf = v.get("workflow") or []
+    if not wf:
+        return None
+    last = wf[-1].get("performed_at") or v.get("updated_at")
+    if not last:
+        return None
+    if isinstance(last, str):
+        try:
+            last = datetime.fromisoformat(last)
+        except ValueError:
+            return None
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    delta = now_utc() - last
+    return delta.total_seconds() / 86400.0
+
+@api.get("/notifications")
+async def list_notifications(user: dict = Depends(get_current_user)):
+    cursor = db.notifications.find({"user_id": user["user_id"]}, {"_id": 0}).sort("created_at", -1).limit(50)
+    return [n async for n in cursor]
+
+@api.post("/notifications/{notification_id}/read")
+async def mark_notification_read(notification_id: str, user: dict = Depends(get_current_user)):
+    await db.notifications.update_one(
+        {"id": notification_id, "user_id": user["user_id"]},
+        {"$set": {"read": True}}
+    )
+    return {"ok": True}
+
+@api.post("/notifications/read-all")
+async def mark_all_read(user: dict = Depends(get_current_user)):
+    await db.notifications.update_many(
+        {"user_id": user["user_id"], "read": False},
+        {"$set": {"read": True}}
+    )
+    return {"ok": True}
+
+@api.get("/sla/alerts")
+async def sla_alerts(user: dict = Depends(require_role("reviewer", "approver", "admin", "sap_team"))):
+    """Vendors stuck in their current stage > 3 days, and documents expiring within 30 days."""
+    out = {"stuck": [], "expiring_docs": []}
+    cursor = db.vendors.find(
+        {"status": {"$in": ["submitted", "under_review", "on_hold", "approved"]}},
+        {"_id": 0, "vendor_id": 1, "general.legal_name": 1, "status": 1, "workflow": 1, "updated_at": 1, "documents": 1}
+    ).limit(500)
+    today = now_utc().date()
+    async for v in cursor:
+        days = _days_in_status(v)
+        if days is not None and days >= 3:
+            out["stuck"].append({
+                "vendor_id": v["vendor_id"],
+                "legal_name": (v.get("general") or {}).get("legal_name"),
+                "status": v["status"],
+                "days_in_status": round(days, 1),
+            })
+        for d in v.get("documents") or []:
+            exp = d.get("expiry_date")
+            if not exp:
+                continue
+            try:
+                exp_date = datetime.fromisoformat(exp).date() if "T" in exp else datetime.strptime(exp, "%Y-%m-%d").date()
+            except ValueError:
+                continue
+            delta_days = (exp_date - today).days
+            if delta_days <= 30:
+                out["expiring_docs"].append({
+                    "vendor_id": v["vendor_id"],
+                    "legal_name": (v.get("general") or {}).get("legal_name"),
+                    "document_type": d["document_type"],
+                    "expiry_date": exp,
+                    "days_left": delta_days,
+                })
+    return out
+
+# ---- Mock SAP integration (production-swappable outbox pattern) ----
+class SapPushIn(BaseModel):
+    company_code: str
+    account_group: str = "KRED"
+    payment_terms: str = "NT30"
+
+    @field_validator("company_code")
+    @classmethod
+    def _cc(cls, v):
+        if v not in ALLOWED_COMPANY_CODES:
+            raise ValueError(f"company_code must be one of {sorted(ALLOWED_COMPANY_CODES)}")
+        return v
+
+async def _mock_bapi_vendor_create(payload: dict) -> dict:
+    """Simulates BAPI_VENDOR_CREATE. In production swap with real SAP/OData/IDoc call."""
+    sap_code = f"4{int(time.time() * 1000) % 100000:05d}"
+    return {
+        "ok": True,
+        "sap_vendor_code": sap_code,
+        "company_code": payload["company_code"],
+        "messages": [
+            {"type": "S", "id": "F2", "number": "012", "message": f"Vendor {sap_code} created in company code {payload['company_code']}"},
+        ],
+        "processed_at": now_utc().isoformat(),
+    }
+
+@api.post("/vendors/{vendor_id}/sap-push")
+async def sap_push(vendor_id: str, body: SapPushIn, user: dict = Depends(require_role("sap_team", "admin"))):
+    v = await db.vendors.find_one({"vendor_id": vendor_id})
+    if not v:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    if v["status"] != "approved":
+        raise HTTPException(status_code=400, detail="Vendor must be approved before SAP push")
+
+    outbox_id = f"out_{uuid.uuid4().hex[:10]}"
+    outbox_doc = {
+        "outbox_id": outbox_id,
+        "vendor_id": vendor_id,
+        "company_code": body.company_code,
+        "payload": {
+            "vendor_id": vendor_id,
+            "name": (v.get("general") or {}).get("legal_name"),
+            "pan": (v.get("compliance") or {}).get("pan"),
+            "gstin": (v.get("compliance") or {}).get("gstin"),
+            "bank": v.get("bank"),
+            "company_code": body.company_code,
+            "account_group": body.account_group,
+            "payment_terms": body.payment_terms,
+        },
+        "status": "pending",
+        "attempts": 0,
+        "created_at": now_utc(),
+        "created_by": user["user_id"],
+    }
+    await db.sap_outbox.insert_one(outbox_doc)
+
+    # Attempt mock push
+    try:
+        result = await _mock_bapi_vendor_create(outbox_doc["payload"])
+        await db.sap_outbox.update_one(
+            {"outbox_id": outbox_id},
+            {"$set": {"status": "done", "attempts": 1, "result": result, "completed_at": now_utc()}}
+        )
+        # Persist mapping on vendor (idempotent)
+        existing = v.get("sap_mappings") or []
+        if any(m["company_code"] == body.company_code for m in existing):
+            raise HTTPException(status_code=400, detail="Company code already mapped")
+        mapping = {
+            "mapping_id": f"map_{uuid.uuid4().hex[:8]}",
+            "company_code": body.company_code,
+            "sap_vendor_code": result["sap_vendor_code"],
+            "account_group": body.account_group,
+            "payment_terms": body.payment_terms,
+            "created_in_sap": True,
+            "sap_created_at": now_utc(),
+            "created_by": user["user_id"],
+            "outbox_id": outbox_id,
+        }
+        set_updates = {"updated_at": now_utc()}
+        if not v.get("vendor_code"):
+            set_updates["vendor_code"] = result["sap_vendor_code"]
+        await db.vendors.update_one(
+            {"vendor_id": vendor_id},
+            {"$push": {"sap_mappings": mapping}, "$set": set_updates}
+        )
+        await _notify_user(v["owner_user_id"],
+                           title=f"You're live in SAP — {result['sap_vendor_code']}",
+                           body=f"Created in company code {body.company_code} (account group {body.account_group}).",
+                           vendor_id=vendor_id)
+        v = await db.vendors.find_one({"vendor_id": vendor_id}, {"_id": 0})
+        return {"ok": True, "outbox_id": outbox_id, "result": result, "vendor": vendor_public(v)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.sap_outbox.update_one(
+            {"outbox_id": outbox_id},
+            {"$set": {"status": "failed", "attempts": 1, "error": str(e)}}
+        )
+        raise HTTPException(status_code=502, detail=f"SAP push failed: {e}")
+
+@api.get("/sap-outbox")
+async def list_outbox(user: dict = Depends(require_role("sap_team", "admin"))):
+    cursor = db.sap_outbox.find({}, {"_id": 0}).sort("created_at", -1).limit(100)
+    return [doc async for doc in cursor]
+
+# ---- Excel export ----
+@api.get("/export/vendors.xlsx")
+async def export_vendors_xlsx(user: dict = Depends(require_role("admin", "approver", "reviewer", "sap_team"))):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Vendors"
+    headers = [
+        "Vendor ID", "SAP Code", "Legal Name", "Trade Name", "Type", "Status",
+        "GSTIN", "PAN", "TAN", "MSME #", "GST Category",
+        "Bank Name", "Account #", "IFSC",
+        "City", "State", "Pincode", "Country",
+        "Email", "Phone",
+        "Submitted At", "Approved At", "Days in Status",
+    ]
+    ws.append(headers)
+    cursor = db.vendors.find({}, {"_id": 0}).sort("updated_at", -1).limit(2000)
+    async for v in cursor:
+        g = v.get("general") or {}
+        c = v.get("compliance") or {}
+        b = v.get("bank") or {}
+        days = _days_in_status(v)
+        ws.append([
+            v.get("vendor_id"), v.get("vendor_code"),
+            g.get("legal_name"), g.get("trade_name"),
+            v.get("vendor_type"), v.get("status"),
+            c.get("gstin"), c.get("pan"), c.get("tan"), c.get("msme_number"), c.get("gst_category"),
+            b.get("bank_name"), b.get("account_number"), b.get("ifsc_code"),
+            g.get("city"), g.get("state"), g.get("pincode"), g.get("country"),
+            g.get("email"), g.get("phone"),
+            v.get("submitted_at").isoformat() if v.get("submitted_at") else None,
+            v.get("approved_at").isoformat() if v.get("approved_at") else None,
+            round(days, 2) if days is not None else None,
+        ])
+    # Style header row
+    from openpyxl.styles import Font, PatternFill, Alignment
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")
+    for col in range(1, len(headers) + 1):
+        cell = ws.cell(row=1, column=col)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="left", vertical="center")
+    # Column widths
+    for col_idx, h in enumerate(headers, 1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(col_idx)].width = max(14, len(h) + 2)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    fname = f"vendors_{now_utc().strftime('%Y%m%d_%H%M')}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'}
+    )
 
 app.include_router(api)

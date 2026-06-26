@@ -107,10 +107,10 @@ export default function LoginPage() {
             New vendor? <Link to="/register" className="text-brand font-medium hover:underline" data-testid="goto-register-link">Register here</Link>
           </div>
 
-          <Card className="mt-8 bg-slate-50 border-dashed">
+          <Card className="mt-8 bg-ink-50 ring-1 ring-ink-200/70 border-0">
             <div className="px-4 py-3">
-              <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-1.5">Demo credentials</div>
-              <div className="text-xs text-slate-600 space-y-0.5 font-mono">
+              <div className="text-[10px] font-mono uppercase tracking-widest text-ink-500 mb-1.5">Demo credentials</div>
+              <div className="text-[12px] text-ink-700 space-y-0.5 font-mono">
                 <div>admin@keva.com · Admin@123</div>
                 <div>reviewer@keva.com · Review@123</div>
                 <div>approver@keva.com · Approve@123</div>

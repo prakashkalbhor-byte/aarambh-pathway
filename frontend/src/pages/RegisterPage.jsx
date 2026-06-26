@@ -41,7 +41,7 @@ export default function RegisterPage() {
         </Link>
 
         <h1 className="text-2xl font-bold text-slate-900 mb-2 font-heading">Create your vendor account</h1>
-        <p className="text-sm text-slate-600 mb-6">You'll complete a guided onboarding right after.</p>
+        <p className="text-sm text-slate-600 mb-6">You&apos;ll complete a guided onboarding right after.</p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>

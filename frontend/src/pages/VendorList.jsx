@@ -34,7 +34,7 @@ export default function VendorList() {
 
   return (
     <AppShell>
-      <div className="max-w-7xl mx-auto">
+      <div className="px-6 lg:px-8 py-6 lg:py-8 max-w-7xl mx-auto">
         <div className="mb-6">
           <h1 className="text-3xl font-bold text-slate-900 font-heading">Vendors</h1>
           <p className="text-slate-600 mt-1">

@@ -162,6 +162,14 @@ def test_vendor_patch_compliance_bank_contacts(vendor_session_and_id):
     assert v["compliance"]["pan"] == "ABCDE1234F"
     assert v["bank"]["ifsc_code"] == "HDFC0000123"
     assert len(v["contacts"]) == 1
+    # Attach required docs (P0 pre-submit check)
+    for dtype in ("pan_card", "cancelled_cheque", "gstin_certificate"):
+        s.post(f"{API}/vendors/{vid}/documents", json={
+            "document_type": dtype, "file_name": f"{dtype}.pdf",
+            "public_id": f"vendor_portal/{vid}/{dtype}",
+            "secure_url": f"https://res.cloudinary.com/x/upload/{dtype}.pdf",
+            "mime_type": "application/pdf", "file_size_bytes": 1234,
+        }, timeout=15)
 
 
 def test_vendor_submit(vendor_session_and_id):
@@ -245,8 +253,14 @@ def test_reject_flow():
     vid = r.json()["vendor_id"]
     s.patch(f"{API}/vendors/{vid}", json={
         "compliance": {"pan": "ABCDE1234F"},
-        "bank": {"account_number": "1", "ifsc_code": "X"},
+        "bank": {"account_number": "12345", "ifsc_code": "HDFC0001234"},
     }, timeout=15)
+    for dtype in ("pan_card", "cancelled_cheque"):
+        s.post(f"{API}/vendors/{vid}/documents", json={
+            "document_type": dtype, "file_name": f"{dtype}.pdf",
+            "public_id": f"vendor_portal/{vid}/{dtype}",
+            "secure_url": f"https://x/{dtype}.pdf",
+            "mime_type": "application/pdf"}, timeout=15)
     s.post(f"{API}/vendors/{vid}/submit", timeout=15)
     rev = make_session("reviewer")
     r = rev.post(f"{API}/vendors/{vid}/workflow", json={"action": "reject", "remarks": "bad"}, timeout=15)
@@ -264,8 +278,14 @@ def test_request_revision_flow():
     vid = r.json()["vendor_id"]
     s.patch(f"{API}/vendors/{vid}", json={
         "compliance": {"pan": "ABCDE1234F"},
-        "bank": {"account_number": "1", "ifsc_code": "X"},
+        "bank": {"account_number": "12345", "ifsc_code": "HDFC0001234"},
     }, timeout=15)
+    for dtype in ("pan_card", "cancelled_cheque"):
+        s.post(f"{API}/vendors/{vid}/documents", json={
+            "document_type": dtype, "file_name": f"{dtype}.pdf",
+            "public_id": f"vendor_portal/{vid}/{dtype}",
+            "secure_url": f"https://x/{dtype}.pdf",
+            "mime_type": "application/pdf"}, timeout=15)
     s.post(f"{API}/vendors/{vid}/submit", timeout=15)
     rev = make_session("reviewer")
     r = rev.post(f"{API}/vendors/{vid}/workflow",

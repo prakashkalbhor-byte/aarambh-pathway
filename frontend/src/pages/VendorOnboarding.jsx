@@ -154,7 +154,7 @@ export default function VendorOnboarding() {
   if (!vendor) {
     return (
       <AppShell>
-        <div className="max-w-3xl mx-auto">
+        <div className="px-6 lg:px-8 py-6 lg:py-8 max-w-3xl mx-auto">
           <h1 className="text-3xl font-bold text-slate-900 font-heading mb-1">Start vendor onboarding</h1>
           <p className="text-slate-600 mb-8">Begin by selecting your vendor type and entering general information. You can save and continue at any time.</p>
 
@@ -207,7 +207,7 @@ export default function VendorOnboarding() {
 
   return (
     <AppShell>
-      <div className="max-w-6xl mx-auto grid lg:grid-cols-[280px,1fr] gap-8">
+      <div className="px-6 lg:px-8 py-6 lg:py-8 max-w-6xl mx-auto grid lg:grid-cols-[260px,1fr] gap-8">
         {/* Sidebar steps */}
         <aside className="lg:sticky lg:top-24 self-start">
           <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-3">Progress</div>

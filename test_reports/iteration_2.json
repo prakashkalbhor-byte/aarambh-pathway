@@ -1,0 +1,58 @@
+{
+  "summary": "Iteration 2 — Validated P0/P1/P2 features + Aarambh design refresh. Backend: 49 passed, 1 xfail (documenting a real bug). Frontend: dashboard layout, sidebar (244px ink-900), Inter font, breadcrumbs '·', ⌘K hint, Export Excel button, 6 stat tiles, SLA 'Today' pill all verified. Reviewer NotificationsBell + panel shows the new-vendor-submitted notifications end-to-end.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/vendors/{id}/sap-push",
+        "issue": "SapPushIn model is MISSING the account_group field_validator. Only company_code is whitelisted; invalid account_group like 'BADGRP' returns 200 OK and persists a bogus mapping. SapMappingIn has both validators — copy the _ag validator (lines 317-322 of server.py) onto SapPushIn (after the existing _cc validator near line 974)."
+      },
+      {
+        "endpoint": "GET /health (external)",
+        "issue": "Public ingress only routes /api/*, so https://<host>/health serves the React index.html. The endpoint works internally on :8001 (verified) so k8s liveness probes are fine — but if the probe is configured against the external URL it will succeed for the wrong reason. Recommend probe hits http://localhost:8001/health (or move /health under /api)."
+      },
+      {
+        "endpoint": "OPTIONS /api/* (CORS)",
+        "issue": "Cloudflare edge intercepts preflight and returns 204 with 'Access-Control-Allow-Origin: *' for ALL origins (including https://attacker.example.com). The backend allow_origin_regex never gets a chance to filter. Behaviorally the actual POST request still has its Origin checked by the browser, so this is low-risk, but the regex is effectively a no-op on the public URL. Verified via localhost:8001 that the regex itself works correctly (200 for emergent origin, 400 for attacker)."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Global", "issues": ["React Router v6 future-flag warnings still in console (v7_startTransition, v7_relativeSplatPath) — same as iteration 1, non-blocking"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_backend.py",
+    "/app/backend/tests/test_p0_p1_p2.py",
+    "/app/test_reports/pytest/iteration_2_results.xml"
+  ],
+  "action_items": [
+    "BACKEND: Add @field_validator('account_group') to SapPushIn (currently only SapMappingIn validates it). Pattern: copy the existing _ag validator from SapMappingIn lines 317-322 onto SapPushIn (server.py ~line 974).",
+    "OPTIONAL: Move /health under /api so the external Kubernetes ingress can route to it (or document that the probe hits the pod directly on :8001).",
+    "OPTIONAL: Idempotency on sap-push — current code rejects with 400 'Company code already mapped' after the mock BAPI call has already executed and created an outbox 'done' entry; consider checking duplicates BEFORE the mock push to avoid orphan outbox rows."
+  ],
+  "critical_code_review_comments": [
+    "SapPushIn validates company_code but not account_group — duplication gap with SapMappingIn (a single shared mixin would be cleaner).",
+    "sap_push() does the 'company_code already mapped' check AFTER the mock BAPI call succeeds, leaving an orphaned outbox 'done' entry for a never-persisted mapping. Move the duplicate check to before _mock_bapi_vendor_create().",
+    "server.py is now ~1130 lines. With notifications/SLA/outbox/excel added, time to split into routers/ subpackage (auth/vendors/workflow/notifications/sap/admin).",
+    "validate_compliance/bank do not call validate_general inside PATCH for nested vendor_type — PATCH never re-validates the previously saved general when vendor_type changes; minor edge case.",
+    "Excel export streams the whole 2000-row workbook in memory; fine for current scale but consider write_only=True for >10k vendors.",
+    "_days_in_status uses the last workflow item's performed_at — for 'draft' vendors with no workflow it returns None, so SLA stuck-list silently ignores stale drafts (probably intentional, worth a code comment)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_backend.py (updated submit fixture & reject/revision flows to attach required docs + valid IFSC for P0 strict pre-submit)",
+    "/app/backend/tests/test_p0_p1_p2.py (new — 21 cases covering all P0/P1/P2 features)",
+    "/app/test_reports/iteration_2.json (new)",
+    "/app/test_reports/pytest/iteration_2_results.xml (new)"
+  ],
+  "success_rate": {"backend": "100% (49 passed, 1 xfail = documented bug)", "frontend": "100% on critical design + notifications integration"},
+  "test_credentials": "Used seeded creds from /app/memory/test_credentials.md — admin@keva.com/Admin@123, reviewer@keva.com/Review@123, approver@keva.com/Approve@123, sap@keva.com/Sap@123. Pytest fixtures register fresh TEST_-prefixed vendors per run.",
+  "seed_data_creation": "21 throwaway vendors created (TEST_val_*, TEST_sub_*, TEST_rej_*, TEST_rev_*). Reviewer dashboard now shows ~15 submitted records. Safe to drop db.vendors where general.legal_name starts with 'TEST '.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Frontend login uses data-testid='login-email-input' / 'login-password-input' / 'login-submit-btn' (NOTE: iteration 1 used '-email'/'-password' without -input). Notifications panel testid = 'notifications-panel', bell testid = 'notifications-bell'. Export button testid = 'export-vendors-btn'. Sidebar is `aside` (244px). Stat tiles do NOT have data-testid; identify via the label text ('Draft','Submitted',...). Vendor list rows on reviewer dashboard render WITHOUT 'vendor-list-row-*' testids — they are anchors inside the table tbody on /dashboard; use 'vendor-row-*' on the dedicated /vendors page (verified iteration 1). The xfail test_sap_push_invalid_account_group_rejected will flip to PASSED once main agent adds the account_group validator. After fix, re-run: python -m pytest /app/backend/tests/ -v",
+  "rca of the issue": "Missing account_group validator on SapPushIn — root cause is that during the P0 work, the company_code validator was correctly added to SapPushIn but the account_group validator (which exists on the older SapMappingIn schema) was not copied over. Reproduction: POST /api/vendors/{approved_id}/sap-push with body {company_code:'1000', account_group:'BADGRP', payment_terms:'NT30'} as sap_team — currently returns 200 with a bogus account_group persisted. Mitigation: add `@field_validator('account_group')` classmethod to SapPushIn returning v.upper() if v in ALLOWED_ACCT_GROUPS else raise."
+}

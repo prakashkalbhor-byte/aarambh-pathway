@@ -44,7 +44,7 @@ export default function LandingPage() {
                 Register as a vendor <ArrowRight className="w-4 h-4" />
               </Button>
               <Button size="lg" variant="outline" onClick={() => navigate("/login")} data-testid="hero-login-btn">
-                I'm a Keva employee
+                I&apos;m an Aarambh employee
               </Button>
             </div>
             <div className="mt-10 flex flex-wrap gap-6 text-xs text-slate-500 font-mono uppercase tracking-widest">
