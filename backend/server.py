@@ -977,6 +977,13 @@ class SapPushIn(BaseModel):
             raise ValueError(f"company_code must be one of {sorted(ALLOWED_COMPANY_CODES)}")
         return v
 
+    @field_validator("account_group")
+    @classmethod
+    def _ag(cls, v):
+        if v.upper() not in ALLOWED_ACCT_GROUPS:
+            raise ValueError(f"account_group must be one of {sorted(ALLOWED_ACCT_GROUPS)}")
+        return v.upper()
+
 async def _mock_bapi_vendor_create(payload: dict) -> dict:
     """Simulates BAPI_VENDOR_CREATE. In production swap with real SAP/OData/IDoc call."""
     sap_code = f"4{int(time.time() * 1000) % 100000:05d}"
@@ -997,6 +1004,9 @@ async def sap_push(vendor_id: str, body: SapPushIn, user: dict = Depends(require
         raise HTTPException(status_code=404, detail="Vendor not found")
     if v["status"] != "approved":
         raise HTTPException(status_code=400, detail="Vendor must be approved before SAP push")
+    # Idempotency: reject duplicate mapping BEFORE calling SAP to avoid orphaned outbox rows
+    if any(m["company_code"] == body.company_code for m in (v.get("sap_mappings") or [])):
+        raise HTTPException(status_code=400, detail="Company code already mapped")
 
     outbox_id = f"out_{uuid.uuid4().hex[:10]}"
     outbox_doc = {
@@ -1027,10 +1037,7 @@ async def sap_push(vendor_id: str, body: SapPushIn, user: dict = Depends(require
             {"outbox_id": outbox_id},
             {"$set": {"status": "done", "attempts": 1, "result": result, "completed_at": now_utc()}}
         )
-        # Persist mapping on vendor (idempotent)
-        existing = v.get("sap_mappings") or []
-        if any(m["company_code"] == body.company_code for m in existing):
-            raise HTTPException(status_code=400, detail="Company code already mapped")
+        # Persist mapping on vendor (duplicate guard happens upfront above)
         mapping = {
             "mapping_id": f"map_{uuid.uuid4().hex[:8]}",
             "company_code": body.company_code,

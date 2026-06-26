@@ -243,7 +243,6 @@ def test_sap_push_invalid_company_code_rejected(approved_vendor_id):
     assert r.status_code in (400, 422)
 
 
-@pytest.mark.xfail(reason="BACKEND BUG: SapPushIn is missing field_validator for account_group; only company_code is whitelisted (SapMappingIn has both validators). Main agent should add the _ag validator to SapPushIn.")
 def test_sap_push_invalid_account_group_rejected(approved_vendor_id):
     sap = make_session("sap")
     r = sap.post(f"{API}/vendors/{approved_vendor_id}/sap-push",
