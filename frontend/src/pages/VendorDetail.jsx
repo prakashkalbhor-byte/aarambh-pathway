@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, formatApiError } from "../lib/api";
 import { useAuth } from "../App";
@@ -18,7 +18,7 @@ export default function VendorDetail() {
 
   const [sapForm, setSapForm] = useState({ company_code: "1000", account_group: "KRED", payment_terms: "NT30", sap_vendor_code: "" });
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       const { data } = await api.get(`/vendors/${vendorId}`);
       setVendor(data);
@@ -26,9 +26,9 @@ export default function VendorDetail() {
       toast.error(formatApiError(err));
       navigate("/dashboard");
     }
-  };
+  }, [vendorId, toast, navigate]);
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [vendorId]);
+  useEffect(() => { load(); }, [load]);
 
   if (!vendor) {
     return <AppShell><div className="text-sm text-slate-500">Loading…</div></AppShell>;
@@ -131,7 +131,7 @@ export default function VendorDetail() {
               {vendor.contacts?.length ? (
                 <div className="col-span-2 space-y-2.5">
                   {vendor.contacts.map((c, i) => (
-                    <div key={i} className="flex items-baseline gap-3 border-b border-dashed border-slate-200 last:border-0 pb-2.5">
+                    <div key={`${c.contact_type}-${c.email || c.name || i}`} className="flex items-baseline gap-3 border-b border-dashed border-slate-200 last:border-0 pb-2.5">
                       <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 w-20 shrink-0">{c.contact_type}</div>
                       <div className="text-sm">
                         <div className="font-medium text-slate-900">{c.name} {c.designation && <span className="text-slate-500 font-normal">— {c.designation}</span>}</div>
@@ -253,8 +253,8 @@ export default function VendorDetail() {
               <div className="p-5">
                 {vendor.workflow?.length ? (
                   <ol className="relative border-l border-slate-200 pl-5 space-y-4">
-                    {[...vendor.workflow].reverse().map((w, i) => (
-                      <li key={i} className="relative">
+                    {[...vendor.workflow].reverse().map((w) => (
+                      <li key={`${w.action}-${w.performed_at}-${w.performed_by}`} className="relative">
                         <span className="absolute -left-[24px] top-1.5 w-2.5 h-2.5 rounded-full bg-brand ring-4 ring-brand/15" />
                         <div className="flex items-center gap-2 text-sm font-medium text-slate-900 capitalize">{w.action.replace(/_/g, " ")}</div>
                         <div className="text-xs text-slate-500">

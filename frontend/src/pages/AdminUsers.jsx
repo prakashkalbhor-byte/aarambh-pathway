@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { api, formatApiError } from "../lib/api";
 import AppShell from "../components/AppShell";
 import { Card, Select } from "../components/ui";
@@ -10,11 +10,11 @@ export default function AdminUsers() {
   const toast = useToast();
   const [users, setUsers] = useState([]);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try { const { data } = await api.get("/admin/users"); setUsers(data); }
     catch (err) { toast.error(formatApiError(err)); }
-  };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+  }, [toast]);
+  useEffect(() => { load(); }, [load]);
 
   const updateUser = async (user_id, patch) => {
     try {

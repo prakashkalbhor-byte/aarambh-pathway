@@ -100,21 +100,25 @@ const STATUS_STYLES = {
   on_hold: "bg-orange-100 text-orange-700",
 };
 
+const STATUS_DOT_COLORS = {
+  approved: "bg-emerald-500",
+  rejected: "bg-rose-500",
+  under_review: "bg-amber-500",
+  submitted: "bg-blue-500",
+  on_hold: "bg-orange-500",
+  draft: "bg-slate-400",
+};
+
 export function StatusBadge({ status, className }) {
   const label = (status || "").replace(/_/g, " ");
+  const dotColor = STATUS_DOT_COLORS[status] || "bg-slate-400";
   return (
     <span className={cn(
       "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium capitalize",
       STATUS_STYLES[status] || "bg-slate-100 text-slate-700",
       className
     )}>
-      <span className={cn("w-1.5 h-1.5 rounded-full",
-        status === "approved" ? "bg-emerald-500" :
-        status === "rejected" ? "bg-rose-500" :
-        status === "under_review" ? "bg-amber-500" :
-        status === "submitted" ? "bg-blue-500" :
-        status === "on_hold" ? "bg-orange-500" : "bg-slate-400"
-      )} />
+      <span className={cn("w-1.5 h-1.5 rounded-full", dotColor)} />
       {label}
     </span>
   );

@@ -36,7 +36,7 @@ export default function AppShell({ children }) {
   const items = NAV[user?.role] || [];
 
   const handleLogout = async () => {
-    try { await api.post("/auth/logout"); } catch {}
+    try { await api.post("/auth/logout"); } catch (err) { console.error("logout error", err); }
     setUser(null);
     navigate("/login");
   };

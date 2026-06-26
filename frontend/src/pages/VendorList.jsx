@@ -20,7 +20,9 @@ export default function VendorList() {
       try {
         const { data } = await api.get("/vendors", { params: status ? { status } : {} });
         setVendors(data);
-      } catch {}
+      } catch (err) {
+        console.error("vendor list load failed", err);
+      }
     })();
   }, [status]);
 

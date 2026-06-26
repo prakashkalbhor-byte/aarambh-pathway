@@ -1,25 +1,24 @@
-import React, { createContext, useContext, useState, useCallback } from "react";
+import React, { createContext, useContext, useState, useCallback, useRef, useMemo } from "react";
 import { X, CheckCircle2, AlertCircle, Info } from "lucide-react";
 import { cn } from "../lib/utils";
 
 const Ctx = createContext(null);
 export function useToast() { return useContext(Ctx); }
 
-let id = 0;
-
 export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([]);
+  const idRef = useRef(0);
   const remove = useCallback((tid) => setToasts((t) => t.filter((x) => x.id !== tid)), []);
   const push = useCallback((kind, message) => {
-    const tid = ++id;
+    const tid = ++idRef.current;
     setToasts((t) => [...t, { id: tid, kind, message }]);
     setTimeout(() => remove(tid), 4200);
   }, [remove]);
-  const value = {
+  const value = useMemo(() => ({
     success: (m) => push("success", m),
     error: (m) => push("error", m),
     info: (m) => push("info", m),
-  };
+  }), [push]);
   return (
     <Ctx.Provider value={value}>
       {children}

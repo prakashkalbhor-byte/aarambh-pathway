@@ -56,6 +56,11 @@ app.add_middleware(
 
 api = APIRouter(prefix="/api")
 
+# Plain root-level health endpoint for Kubernetes liveness/readiness probes
+@app.get("/health")
+async def root_health():
+    return {"status": "ok"}
+
 # ---------------------------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------------------------
@@ -111,38 +116,53 @@ def public_user(doc: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Auth dependency
 # ---------------------------------------------------------------------------
+def _extract_bearer_token(request: Request) -> Optional[str]:
+    """Read access_token cookie first, fall back to Authorization: Bearer."""
+    token = request.cookies.get("access_token")
+    if token:
+        return token
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        return auth[7:]
+    return None
+
+async def _user_from_jwt(token: str) -> Optional[dict]:
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
+    except jwt.PyJWTError:
+        return None
+    if payload.get("type") != "access":
+        return None
+    return await db.users.find_one({"user_id": payload["sub"]}, {"_id": 0, "password_hash": 0})
+
+def _normalize_expiry(expires_at) -> datetime:
+    if isinstance(expires_at, str):
+        expires_at = datetime.fromisoformat(expires_at)
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    return expires_at
+
+async def _user_from_session_cookie(session_token: str) -> Optional[dict]:
+    sess = await db.user_sessions.find_one({"session_token": session_token}, {"_id": 0})
+    if not sess:
+        return None
+    if _normalize_expiry(sess["expires_at"]) <= now_utc():
+        return None
+    return await db.users.find_one({"user_id": sess["user_id"]}, {"_id": 0, "password_hash": 0})
+
 async def get_current_user(request: Request) -> dict:
     # 1. JWT access_token cookie / Bearer header
-    token = request.cookies.get("access_token")
-    if not token:
-        auth = request.headers.get("Authorization", "")
-        if auth.startswith("Bearer "):
-            token = auth[7:]
+    token = _extract_bearer_token(request)
     if token:
-        try:
-            payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
-            if payload.get("type") == "access":
-                user = await db.users.find_one({"user_id": payload["sub"]}, {"_id": 0, "password_hash": 0})
-                if user:
-                    return user
-        except jwt.PyJWTError:
-            pass
-
+        user = await _user_from_jwt(token)
+        if user:
+            return user
     # 2. Emergent session_token cookie
     session_token = request.cookies.get("session_token")
     if session_token:
-        sess = await db.user_sessions.find_one({"session_token": session_token}, {"_id": 0})
-        if sess:
-            expires_at = sess["expires_at"]
-            if isinstance(expires_at, str):
-                expires_at = datetime.fromisoformat(expires_at)
-            if expires_at.tzinfo is None:
-                expires_at = expires_at.replace(tzinfo=timezone.utc)
-            if expires_at > now_utc():
-                user = await db.users.find_one({"user_id": sess["user_id"]}, {"_id": 0, "password_hash": 0})
-                if user:
-                    return user
-
+        user = await _user_from_session_cookie(session_token)
+        if user:
+            return user
     raise HTTPException(status_code=401, detail="Not authenticated")
 
 def require_role(*roles: str):
@@ -523,47 +543,33 @@ async def submit_vendor(vendor_id: str, user: dict = Depends(get_current_user)):
     v = await db.vendors.find_one({"vendor_id": vendor_id}, {"_id": 0})
     return vendor_public(v)
 
+# Mapping of (action, role, current_status) -> (new_status, action_label)
+INTERNAL_ROLES = ("reviewer", "approver", "admin")
+
+def _resolve_workflow_transition(action: str, role: str, status: str):
+    if action == "approve":
+        if role == "reviewer" and status == "submitted":
+            return "under_review", "reviewed"
+        if role in ("approver", "admin") and status in ("under_review", "on_hold", "submitted"):
+            return "approved", "approved"
+        return None, None
+    if action == "reject" and role in INTERNAL_ROLES:
+        return "rejected", "rejected"
+    if action == "request_revision" and role in INTERNAL_ROLES:
+        return "on_hold", "revision_requested"
+    if action == "hold" and role in INTERNAL_ROLES:
+        return "on_hold", "hold"
+    return None, None
+
 @api.post("/vendors/{vendor_id}/workflow")
 async def workflow_action(vendor_id: str, body: WorkflowActionIn, user: dict = Depends(get_current_user)):
     v = await db.vendors.find_one({"vendor_id": vendor_id})
     if not v:
         raise HTTPException(status_code=404, detail="Vendor not found")
 
-    role = user["role"]
-    status = v["status"]
-    new_status = None
-    action_name = None
-
-    if body.action == "approve":
-        if role == "reviewer" and status == "submitted":
-            new_status = "under_review"
-            action_name = "reviewed"
-        elif role == "approver" and status in ("under_review", "on_hold"):
-            new_status = "approved"
-            action_name = "approved"
-        elif role == "admin":
-            new_status = "approved"
-            action_name = "approved"
-        else:
-            raise HTTPException(status_code=403, detail="Not allowed at this stage")
-    elif body.action == "reject":
-        if role in ("reviewer", "approver", "admin"):
-            new_status = "rejected"
-            action_name = "rejected"
-        else:
-            raise HTTPException(status_code=403, detail="Not allowed")
-    elif body.action == "request_revision":
-        if role in ("reviewer", "approver", "admin"):
-            new_status = "on_hold"
-            action_name = "revision_requested"
-        else:
-            raise HTTPException(status_code=403, detail="Not allowed")
-    elif body.action == "hold":
-        if role in ("reviewer", "approver", "admin"):
-            new_status = "on_hold"
-            action_name = "hold"
-        else:
-            raise HTTPException(status_code=403, detail="Not allowed")
+    new_status, action_name = _resolve_workflow_transition(body.action, user["role"], v["status"])
+    if not new_status:
+        raise HTTPException(status_code=403, detail="Action not allowed at this stage")
 
     wf = {
         "action": action_name,
@@ -571,7 +577,7 @@ async def workflow_action(vendor_id: str, body: WorkflowActionIn, user: dict = D
         "performed_by_name": user.get("full_name"),
         "performed_at": now_utc(),
         "remarks": body.remarks,
-        "previous_status": status,
+        "previous_status": v["status"],
         "new_status": new_status,
     }
     set_doc = {"status": new_status, "updated_at": now_utc()}

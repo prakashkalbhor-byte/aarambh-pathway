@@ -34,7 +34,9 @@ export default function DashboardPage() {
           const mine = await api.get("/vendors/mine");
           setMyVendor(mine.data);
         }
-      } catch {}
+      } catch (err) {
+        console.error("dashboard load failed", err);
+      }
     })();
   }, [user]);
 

@@ -51,24 +51,26 @@ export default function VendorOnboarding() {
     bank_name: "", branch_name: "", account_type: "current",
     is_primary: true, swift_code: "", iban: "",
   });
-  const [contacts, setContacts] = useState([{ contact_type: "primary", name: "", designation: "", email: "", phone: "", mobile: "" }]);
+  const [contacts, setContacts] = useState([{ _key: "c0", contact_type: "primary", name: "", designation: "", email: "", phone: "", mobile: "" }]);
 
-  // Load existing vendor
+  // Load existing vendor (mount only — uses functional setState to avoid stale-closure deps)
   useEffect(() => {
     (async () => {
       try {
         const { data } = await api.get("/vendors/mine");
-        if (data) {
-          setVendor(data);
-          setVendorType(data.vendor_type);
-          setGeneral({ ...general, ...(data.general || {}) });
-          if (data.compliance) setCompliance({ ...compliance, ...data.compliance });
-          if (data.bank) setBank({ ...bank, ...data.bank });
-          if (data.contacts?.length) setContacts(data.contacts);
+        if (!data) return;
+        setVendor(data);
+        setVendorType(data.vendor_type);
+        setGeneral((g) => ({ ...g, ...(data.general || {}) }));
+        if (data.compliance) setCompliance((c) => ({ ...c, ...data.compliance }));
+        if (data.bank) setBank((b) => ({ ...b, ...data.bank }));
+        if (data.contacts?.length) {
+          setContacts(data.contacts.map((c, i) => ({ _key: c._key || `c${i}-${Date.now()}`, ...c })));
         }
-      } catch {}
+      } catch (err) {
+        console.error("vendor load failed", err);
+      }
     })();
-    // eslint-disable-next-line
   }, []);
 
   const readonly = vendor && !["draft", "on_hold"].includes(vendor.status);
@@ -213,19 +215,20 @@ export default function VendorOnboarding() {
             {STEPS.map((s, i) => {
               const completed = i < step;
               const current = i === step;
+              let btnBg = "hover:bg-slate-100";
+              if (current) btnBg = "bg-brand-muted/60";
+              else if (completed) btnBg = "";
+              let dotCls = "bg-slate-200 text-slate-600";
+              if (completed) dotCls = "bg-emerald-600 text-white";
+              else if (current) dotCls = "bg-brand text-white";
               return (
                 <li key={s.id}>
                   <button
                     onClick={() => setStep(i)}
-                    className={`w-full text-left flex items-start gap-3 px-3 py-2.5 rounded-md transition-all ${
-                      current ? "bg-brand-muted/60" : completed ? "" : "hover:bg-slate-100"
-                    }`}
+                    className={`w-full text-left flex items-start gap-3 px-3 py-2.5 rounded-md transition-all ${btnBg}`}
                     data-testid={`step-${s.id}`}
                   >
-                    <div className={`mt-0.5 w-6 h-6 rounded-full grid place-items-center text-[10px] font-mono font-semibold shrink-0 ${
-                      completed ? "bg-emerald-600 text-white" :
-                      current ? "bg-brand text-white" : "bg-slate-200 text-slate-600"
-                    }`}>
+                    <div className={`mt-0.5 w-6 h-6 rounded-full grid place-items-center text-[10px] font-mono font-semibold shrink-0 ${dotCls}`}>
                       {completed ? <Check className="w-3 h-3" /> : i + 1}
                     </div>
                     <div className="min-w-0">
@@ -332,31 +335,35 @@ export default function VendorOnboarding() {
           {step === 3 && (
             <StepCard title="Contact Persons" subtitle="Primary, finance and technical contacts at your firm.">
               <div className="space-y-3">
-                {contacts.map((c, idx) => (
-                  <div key={idx} className="border border-slate-200 rounded-lg p-4 bg-slate-50/50 relative">
+                {contacts.map((c, idx) => {
+                  const updateContact = (patch) => setContacts((list) => list.map((x, i) => i === idx ? { ...x, ...patch } : x));
+                  const removeContact = () => setContacts((list) => list.filter((_, i) => i !== idx));
+                  return (
+                  <div key={c._key || c.contact_type + "-" + idx} className="border border-slate-200 rounded-lg p-4 bg-slate-50/50 relative">
                     <div className="grid sm:grid-cols-2 gap-4">
                       <div>
                         <Label>Contact Type</Label>
-                        <Select value={c.contact_type} onChange={(e) => setContacts(contacts.map((x, i) => i === idx ? { ...x, contact_type: e.target.value } : x))}>
+                        <Select value={c.contact_type} onChange={(e) => updateContact({ contact_type: e.target.value })}>
                           <option value="primary">Primary</option>
                           <option value="finance">Finance</option>
                           <option value="technical">Technical</option>
                         </Select>
                       </div>
-                      <Field label="Name" value={c.name} onChange={(v) => setContacts(contacts.map((x, i) => i === idx ? { ...x, name: v } : x))} testid={`contact-${idx}-name`} />
-                      <Field label="Designation" value={c.designation} onChange={(v) => setContacts(contacts.map((x, i) => i === idx ? { ...x, designation: v } : x))} />
-                      <Field label="Email" type="email" value={c.email} onChange={(v) => setContacts(contacts.map((x, i) => i === idx ? { ...x, email: v } : x))} />
-                      <Field label="Phone" value={c.phone} onChange={(v) => setContacts(contacts.map((x, i) => i === idx ? { ...x, phone: v } : x))} />
-                      <Field label="Mobile" value={c.mobile} onChange={(v) => setContacts(contacts.map((x, i) => i === idx ? { ...x, mobile: v } : x))} />
+                      <Field label="Name" value={c.name} onChange={(v) => updateContact({ name: v })} testid={`contact-${idx}-name`} />
+                      <Field label="Designation" value={c.designation} onChange={(v) => updateContact({ designation: v })} />
+                      <Field label="Email" type="email" value={c.email} onChange={(v) => updateContact({ email: v })} />
+                      <Field label="Phone" value={c.phone} onChange={(v) => updateContact({ phone: v })} />
+                      <Field label="Mobile" value={c.mobile} onChange={(v) => updateContact({ mobile: v })} />
                     </div>
                     {contacts.length > 1 && (
-                      <button className="absolute top-3 right-3 text-slate-400 hover:text-rose-600" onClick={() => setContacts(contacts.filter((_, i) => i !== idx))}>
+                      <button className="absolute top-3 right-3 text-slate-400 hover:text-rose-600" onClick={removeContact}>
                         <Trash2 className="w-4 h-4" />
                       </button>
                     )}
                   </div>
-                ))}
-                <Button variant="outline" size="sm" onClick={() => setContacts([...contacts, { contact_type: "finance", name: "", designation: "", email: "", phone: "", mobile: "" }])} data-testid="add-contact-btn">
+                  );
+                })}
+                <Button variant="outline" size="sm" onClick={() => setContacts((list) => [...list, { _key: `c${Date.now()}`, contact_type: "finance", name: "", designation: "", email: "", phone: "", mobile: "" }])} data-testid="add-contact-btn">
                   + Add another contact
                 </Button>
               </div>
