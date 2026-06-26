@@ -1,0 +1,148 @@
+{
+  "project_name": "Vendor Onboarding & Master Data Management Portal",
+  "theme": "light",
+  "archetype": "Archetype 4: Swiss & High-Contrast",
+  "domain": "Enterprise SaaS, SAP-Integrated, B2B Procurement",
+  "design_philosophy": {
+    "core_principles": [
+      "Authority and Clarity: Information hierarchy is paramount. The design must handle high data density (SAP codes, compliance numbers) without cognitive overload.",
+      "Progressive Disclosure: Multi-step onboarding must reveal complexity only as the vendor advances. Do not overwhelm with all fields at once.",
+      "Functional Aesthetics: Color is strictly functional (Red = Error, Green = Verified/Approved, Blue = Action). Avoid decorative gradients.",
+      "The 'Control Room' Vibe: Reviewer, Approver, and SAP Team dashboards must feel like a high-precision command center. Flat surfaces, crisp borders, no heavy drop shadows."
+    ],
+    "anti_patterns": [
+      "No purple or teal gradients.",
+      "No center-aligned dense forms. Always left-align inputs and labels.",
+      "No 'Bootstrap' standard tables. Use highly customized, dense Shadcn tables with tight padding.",
+      "Do not use generic sans-serif fonts for headings. 'Inter' is banned for headings."
+    ]
+  },
+  "typography": {
+    "headings": {
+      "family": "Chivo",
+      "weights": ["600", "700", "800"],
+      "usage": "H1-H4 headings, dashboard titles, onboarding step titles. Use tracking-tight for sizes above 32px."
+    },
+    "body": {
+      "family": "IBM Plex Sans",
+      "weights": ["400", "500", "600"],
+      "usage": "Paragraphs, form labels, table data, general UI text. Provides excellent legibility for dense technical interfaces."
+    },
+    "monospace": {
+      "family": "JetBrains Mono",
+      "weights": ["400", "500"],
+      "usage": "Use strictly for regulatory and system data: GSTIN, PAN, TAN, IFSC, SWIFT, IBAN, SAP Company Codes, Account Groups."
+    },
+    "hierarchy_rules": {
+      "h1": "text-3xl sm:text-4xl font-bold tracking-tight text-slate-900",
+      "h2": "text-2xl font-semibold tracking-tight text-slate-800",
+      "h3": "text-lg font-semibold text-slate-800",
+      "body": "text-sm text-slate-600 leading-relaxed",
+      "mono_label": "font-mono text-xs text-slate-500 uppercase tracking-widest",
+      "mono_data": "font-mono text-sm text-slate-900 bg-slate-100 px-1.5 py-0.5 rounded-md border border-slate-200"
+    }
+  },
+  "color_palette": {
+    "background": {
+      "primary": "#FFFFFF",
+      "secondary": "#F8FAFC",
+      "tertiary": "#F1F5F9"
+    },
+    "text": {
+      "primary": "#0F172A",
+      "secondary": "#475569",
+      "tertiary": "#64748B",
+      "inverse": "#FFFFFF"
+    },
+    "brand_accents": {
+      "primary": "#0A6ED1",
+      "primary_hover": "#0052CC",
+      "primary_muted": "#E0F2FE"
+    },
+    "functional": {
+      "success": "#10B981",
+      "success_bg": "#D1FAE5",
+      "warning": "#F59E0B",
+      "warning_bg": "#FEF3C7",
+      "error": "#E11D48",
+      "error_bg": "#FFE4E6",
+      "info": "#3B82F6",
+      "info_bg": "#DBEAFE"
+    },
+    "borders": {
+      "default": "#E2E8F0",
+      "focus": "#0A6ED1"
+    }
+  },
+  "spacing_and_layout": {
+    "dashboard_grid": {
+      "style": "Mode B: Control Room Grid",
+      "structure": "grid-cols-1 md:grid-cols-4 lg:grid-cols-12 gap-4 or gap-6",
+      "widget_rules": "Summary metrics span 3 cols, main data tables span 9 or 12 cols. Use h-full to match neighbor heights."
+    },
+    "multi_step_onboarding": {
+      "layout": "Two-column split view.",
+      "sidebar": "w-64 or w-80 fixed left sidebar showing visual progress checklist. bg-slate-50 border-r border-slate-200.",
+      "main_content": "Max-width centered container (max-w-2xl) inside the remaining space. Generous padding (p-8 to p-12)."
+    },
+    "surface_treatment": {
+      "cards": "bg-white border border-slate-200 rounded-lg shadow-sm. NO heavy drop shadows. Sharp, technical feel.",
+      "headers": "Sticky top headers must use Crystal Glass: bg-white/70 backdrop-blur-xl border-b border-slate-200 z-50.",
+      "inputs": "Flat borders, h-10, slightly rounded (rounded-md). Focus state: ring-2 ring-primary/20 border-primary."
+    }
+  },
+  "components_and_ux": {
+    "forms": {
+      "library": "Shadcn UI (Form, Input, Select, Checkbox)",
+      "validation": "Instant inline validation. No post-submit error walls.",
+      "layout": "Labels above inputs. Group related fields in grid-cols-2 (e.g., First Name / Last Name)."
+    },
+    "tables": {
+      "library": "Shadcn UI Table",
+      "density": "High density. py-2 px-3 for cells.",
+      "features": "Sticky headers, row hover states (hover:bg-slate-50), right-aligned numeric columns, status badges."
+    },
+    "status_badges": {
+      "Draft": "bg-slate-100 text-slate-700",
+      "Submitted": "bg-blue-100 text-blue-700",
+      "Under Review": "bg-amber-100 text-amber-700",
+      "Approved": "bg-emerald-100 text-emerald-700",
+      "Rejected": "bg-rose-100 text-rose-700",
+      "On Hold": "bg-orange-100 text-orange-700",
+      "Verified (Document)": "bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1 (include check icon)"
+    },
+    "icons": {
+      "library": "@phosphor-icons/react or lucide-react",
+      "style": "Regular or Duotone weight. Keep sizes consistent (w-4 h-4 for inline, w-5 h-5 for sidebar)."
+    }
+  },
+  "testing_attributes": {
+    "rule": "MANDATORY: All interactive elements must include 'data-testid' attributes.",
+    "format": "kebab-case, role-based",
+    "examples": [
+      "data-testid='login-email-input'",
+      "data-testid='onboarding-step-bank-details'",
+      "data-testid='vendor-approve-button'",
+      "data-testid='upload-gstin-doc-button'"
+    ]
+  },
+  "media": {
+    "login_screen_hero": {
+      "url": "https://images.unsplash.com/photo-1600531529272-023c4b821f14?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjd8MHwxfHNlYXJjaHwxfHxtb2Rlcm4lMjBnbGFzcyUyMG9mZmljZSUyMGJ1aWxkaW5nJTIwY29ycG9yYXRlfGVufDB8fHx8MTc4MjQ1MzY4Mnww&ixlib=rb-4.1.0&q=85",
+      "description": "Modern glass office building reflecting sky. Use on the right side of the split login screen with an overlay to maintain corporate feel.",
+      "overlay": "bg-slate-900/40 or a slight blue tint gradient to ensure any overlaid text is readable."
+    },
+    "dashboard_empty_state": {
+      "url": "https://images.unsplash.com/photo-1517048676732-d65bc937f952?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NDh8MHwxfHNlYXJjaHwxfHxidXNpbmVzcyUyMHByb2Zlc3Npb25hbHMlMjBtZWV0aW5nJTIwYWJzdHJhY3R8ZW58MHx8fHwxNzgyNDUzNjgyfDA&ixlib=rb-4.1.0&q=85",
+      "description": "Business professionals meeting. Use subtly in empty states or success screens."
+    }
+  },
+  "instructions_to_main_agent": [
+    "Do not use generic template styles. This is a robust enterprise portal.",
+    "Implement the multi-step form with a persistent left sidebar progress tracker.",
+    "For all regulatory and system IDs (GSTIN, PAN, SWIFT, SAP Codes), explicitly use the JetBrains Mono font class to prevent misreading characters.",
+    "Ensure the Reviewer and SAP Team tables are data-dense and actionable without requiring excessive clicks.",
+    "Use Shadcn UI components extensively but strip away any 'soft' borders or heavy drop shadows to fit the 'Swiss High-Contrast' archetype.",
+    "Always enforce the data-testid attributes for testing."
+  ]
+}
