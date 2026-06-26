@@ -46,13 +46,24 @@ db = client[DB_NAME]
 # ---------------------------------------------------------------------------
 app = FastAPI(title="Vendor Onboarding Portal API")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[FRONTEND_URL, "http://localhost:3000"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS — allow Emergent preview/production domains by default; override with CORS_ORIGINS env (comma list or "*").
+_cors_env = os.environ.get("CORS_ORIGINS", "").strip()
+if _cors_env and _cors_env != "*":
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[o.strip() for o in _cors_env.split(",") if o.strip()],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=r"https?://([a-zA-Z0-9-]+\.)*(emergent\.host|emergentagent\.com)|http://localhost(:\d+)?",
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 api = APIRouter(prefix="/api")
 
@@ -470,7 +481,7 @@ async def list_vendors(
         query["status"] = "approved"
     if status:
         query["status"] = status
-    cursor = db.vendors.find(query, {"_id": 0}).sort("updated_at", -1)
+    cursor = db.vendors.find(query, {"_id": 0}).sort("updated_at", -1).limit(200)
     return [vendor_public(v) async for v in cursor]
 
 @api.get("/vendors/mine")
@@ -707,7 +718,7 @@ async def verify_document(
 # ---------------------------------------------------------------------------
 @api.get("/admin/users")
 async def list_users(user: dict = Depends(require_role("admin"))):
-    cursor = db.users.find({}, {"_id": 0, "password_hash": 0}).sort("created_at", -1)
+    cursor = db.users.find({}, {"_id": 0, "password_hash": 0}).sort("created_at", -1).limit(200)
     return [doc async for doc in cursor]
 
 class UserPatchIn(BaseModel):
