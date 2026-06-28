@@ -37,3 +37,6 @@ desktop.ini
 # Temp
 *.tmp
 .cache/
+*.env
+credentials.json
+.credentials
