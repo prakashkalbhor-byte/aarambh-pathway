@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>TRD — Vendor Registration Portal</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="doc.css">
+</head>
+<body>
+
+<nav class="doc-nav">
+  <a href="requirements.html">Overview</a>
+  <a href="frd.html">Functional (FRD)</a>
+  <a href="ird.html">Integration (IRD)</a>
+  <a href="trd.html" class="active">Technical (TRD)</a>
+</nav>
+
+<article class="page" data-screen-label="TRD">
+  <header class="doc-header">
+    <div class="meta-left">
+      <div class="doc-kind">Technical Requirements Document</div>
+      <div class="project">Vendor Registration Portal</div>
+    </div>
+    <div class="meta-right">
+      <div><b>Document ID</b> &nbsp; TRD-VRP-001</div>
+      <div><b>Version</b> &nbsp; 1.0 (Draft)</div>
+      <div><b>Date</b> &nbsp; June 24, 2026</div>
+      <div><b>Classification</b> &nbsp; Internal</div>
+    </div>
+  </header>
+
+  <h1 class="doc-title">Technical Requirements</h1>
+  <p class="doc-subtitle">Architecture, technology stack, data model, security, deployment and operations for the Vendor Registration Portal.</p>
+
+  <table class="cover-meta">
+    <tr><th>Owner</th><td>Engineering / Platform</td></tr>
+    <tr><th>Author</th><td>Solution &amp; Technical Architecture</td></tr>
+    <tr><th>Approvers</th><td>CTO · CISO · Head of Platform Engineering</td></tr>
+    <tr><th>Status</th><td>Draft for technical review</td></tr>
+    <tr><th>Related</th><td>FRD-VRP-001, IRD-VRP-001</td></tr>
+  </table>
+
+  <div class="toc">
+    <div class="toc-title">Contents</div>
+    <ol>
+      <li><a href="#purpose">Purpose &amp; Scope</a><span class="dots"></span></li>
+      <li><a href="#arch">Architecture Overview</a><span class="dots"></span></li>
+      <li><a href="#stack">Technology Stack</a><span class="dots"></span></li>
+      <li><a href="#data">Data Architecture</a><span class="dots"></span></li>
+      <li><a href="#api">API Design Standards</a><span class="dots"></span></li>
+      <li><a href="#security">Security Architecture</a><span class="dots"></span></li>
+      <li><a href="#infra">Infrastructure &amp; Deployment</a><span class="dots"></span></li>
+      <li><a href="#obs">Observability &amp; Operations</a><span class="dots"></span></li>
+      <li><a href="#perf">Performance &amp; Scalability</a><span class="dots"></span></li>
+      <li><a href="#dr">Resilience &amp; DR</a><span class="dots"></span></li>
+      <li><a href="#quality">Quality, CI/CD &amp; Constraints</a><span class="dots"></span></li>
+    </ol>
+  </div>
+
+  <!-- 1 -->
+  <h2 class="section" id="purpose"><span class="sec-num">01</span>Purpose &amp; Scope</h2>
+  <p class="lead">This document specifies the technical design and constraints for building, deploying and operating the Vendor Registration Portal (VRP). It is the engineering authority for architecture, stack, data, security and infrastructure decisions, and supports the functional behaviour in the FRD and the interfaces in the IRD.</p>
+
+  <!-- 2 ARCHITECTURE -->
+  <h2 class="section" id="arch"><span class="sec-num">02</span>Architecture Overview</h2>
+  <p>The VRP follows a modular, service-oriented architecture: a single-page front end, a backend-for-frontend (BFF) gateway, and a set of bounded-context services communicating synchronously (REST) and asynchronously (events). External systems are reached only through the Integration Layer (see IRD).</p>
+
+  <div class="stack">
+    <div class="layer"><span class="l-name">Client</span><span class="l-items">SPA (vendor + internal consoles), responsive, WCAG 2.2 AA.</span></div>
+    <div class="layer"><span class="l-name">Edge</span><span class="l-items">CDN, WAF, API Gateway — TLS termination, routing, rate limiting, authn.</span></div>
+    <div class="layer"><span class="l-name">BFF</span><span class="l-items">Aggregates services for the SPA; session, CSRF, request shaping.</span></div>
+    <div class="layer"><span class="l-name">Domain Services</span><span class="l-items">Registration · Workflow · Qualification · Document · Notification · Admin/Config · Audit.</span></div>
+    <div class="layer"><span class="l-name">Eventing</span><span class="l-items">Durable message broker — domain events, async screening, DLQ.</span></div>
+    <div class="layer"><span class="l-name">Data</span><span class="l-items">Relational DB (per service), object store (documents), cache, search index.</span></div>
+    <div class="layer"><span class="l-name">Integration</span><span class="l-items">iPaaS/ESB connectors to IdP, ERP, MDM, screening, tax, banking, email.</span></div>
+  </div>
+
+  <h3 class="sub"><span class="sub-num">2.1</span>Bounded Contexts</h3>
+  <table class="req">
+    <thead><tr><th style="width:24%">Service</th><th>Responsibility</th><th style="width:18%">Owns Data</th></tr></thead>
+    <tbody>
+      <tr><td class="id">Registration</td><td>Vendor profile capture, wizard state, validation, save &amp; resume.</td><td>Registration, Profile</td></tr>
+      <tr><td class="id">Workflow</td><td>Configurable review/approval routing, tasks, SLAs, state machine.</td><td>Tasks, Transitions</td></tr>
+      <tr><td class="id">Qualification</td><td>Orchestrates tax/sanctions/credit/banking checks; computes risk score.</td><td>Check results, Risk</td></tr>
+      <tr><td class="id">Document</td><td>Upload, scan, versioning, expiry tracking, e-signature artefacts.</td><td>Document metadata</td></tr>
+      <tr><td class="id">Notification</td><td>Template rendering, channel dispatch, preferences, digests.</td><td>Templates, Outbox</td></tr>
+      <tr><td class="id">Admin / Config</td><td>Reference data, workflow rules, roles, integration config.</td><td>Config, Reference</td></tr>
+      <tr><td class="id">Audit</td><td>Immutable event log of all changes and access.</td><td>Audit log</td></tr>
+    </tbody>
+  </table>
+
+  <!-- 3 STACK -->
+  <h2 class="section" id="stack"><span class="sec-num">03</span>Technology Stack</h2>
+  <div class="note">Specific products below are the recommended baseline; equivalents may be substituted during detailed design subject to architecture-board approval, provided the principles in this document are upheld.</div>
+  <table class="req">
+    <thead><tr><th style="width:22%">Layer</th><th style="width:34%">Technology</th><th>Rationale</th></tr></thead>
+    <tbody>
+      <tr><td class="id">Front end</td><td>TypeScript, React 18, Vite, design-system component library</td><td>Mature ecosystem, accessibility tooling, team familiarity.</td></tr>
+      <tr><td class="id">BFF / Services</td><td>Java 21 (Spring Boot) <i>or</i> Node 20 (NestJS)</td><td>Strong typing, long-term support, broad library support.</td></tr>
+      <tr><td class="id">API style</td><td>REST + OpenAPI 3.1; async via events</td><td>Contract-first, tooling, gateway compatibility.</td></tr>
+      <tr><td class="id">Datastore</td><td>PostgreSQL 16 (per-service schema)</td><td>ACID, JSONB flexibility, strong operational maturity.</td></tr>
+      <tr><td class="id">Object store</td><td>S3-compatible storage</td><td>Durable, encrypted document storage with lifecycle rules.</td></tr>
+      <tr><td class="id">Cache</td><td>Redis 7</td><td>Session, reference-data caching, rate-limit counters.</td></tr>
+      <tr><td class="id">Search</td><td>OpenSearch / Elasticsearch</td><td>Free-text and faceted search across registrations.</td></tr>
+      <tr><td class="id">Messaging</td><td>Apache Kafka (or managed equivalent)</td><td>Durable, ordered, replayable domain events; DLQ support.</td></tr>
+      <tr><td class="id">Workflow engine</td><td>BPMN engine (e.g. Camunda/Flowable)</td><td>No-code configurable workflows, SLA timers, audit.</td></tr>
+      <tr><td class="id">Identity</td><td>Corporate OIDC IdP (internal); managed CIAM (vendors)</td><td>SSO for staff, secure self-service for external vendors.</td></tr>
+      <tr><td class="id">Container / orchestration</td><td>Docker, Kubernetes</td><td>Portability, horizontal scaling, rolling deploys.</td></tr>
+      <tr><td class="id">IaC</td><td>Terraform</td><td>Declarative, reviewable, reproducible infrastructure.</td></tr>
+      <tr><td class="id">CI/CD</td><td>Git-based pipeline, container registry, GitOps deploy</td><td>Automated, auditable releases.</td></tr>
+      <tr><td class="id">Observability</td><td>OpenTelemetry, Prometheus, Grafana, centralised logs</td><td>Traces, metrics, logs with correlation.</td></tr>
+    </tbody>
+  </table>
+
+  <!-- 4 DATA -->
+  <h2 class="section" id="data"><span class="sec-num">04</span>Data Architecture</h2>
+  <h3 class="sub"><span class="sub-num">4.1</span>Core Entities</h3>
+  <table class="req">
+    <thead><tr><th style="width:22%">Entity</th><th>Key Attributes</th><th style="width:22%">Relationships</th></tr></thead>
+    <tbody>
+      <tr><td class="id">Registration</td><td>id (UUID), status, riskTier, country, createdBy, timestamps</td><td>1—1 Profile; 1—N Document, Task</td></tr>
+      <tr><td class="id">Profile</td><td>legalName, taxId, addresses, contacts, banking[], categories[], UBO[]</td><td>1—1 Registration</td></tr>
+      <tr><td class="id">Document</td><td>type, version, expiry, hash, scanStatus, storageKey</td><td>N—1 Registration</td></tr>
+      <tr><td class="id">CheckResult</td><td>type (TAX/SANCTIONS/CREDIT/BANK), decision, score, payloadRef</td><td>N—1 Registration</td></tr>
+      <tr><td class="id">Task</td><td>step, assigneeGroup, assignee, slaDue, decision, comments</td><td>N—1 Registration</td></tr>
+      <tr><td class="id">AuditEvent</td><td>actor, action, entity, before, after, ip, traceId, ts</td><td>append-only</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sub"><span class="sub-num">4.2</span>Data Management Requirements</h3>
+  <table class="req">
+    <thead><tr><th style="width:13%">ID</th><th style="width:26%">Topic</th><th>Requirement</th></tr></thead>
+    <tbody>
+      <tr><td class="id">DATA-01</td><td>Ownership</td><td>Each service owns its schema; cross-service access is via API/events only — no shared tables.</td></tr>
+      <tr><td class="id">DATA-02</td><td>Classification</td><td>Banking, tax and UBO data classified <b>Restricted</b>; encrypted at rest with envelope keys in a managed KMS.</td></tr>
+      <tr><td class="id">DATA-03</td><td>Residency</td><td>Restricted data stored in-region per data-residency rules; storage region is configurable per tenant/country.</td></tr>
+      <tr><td class="id">DATA-04</td><td>Retention</td><td>Submission artefacts 10 years; audit 7 years; soft-delete then purge per policy.</td></tr>
+      <tr><td class="id">DATA-05</td><td>PII minimisation</td><td>Only fields with a documented purpose are collected; subject-rights export/erasure supported.</td></tr>
+      <tr><td class="id">DATA-06</td><td>Audit immutability</td><td>Audit log is append-only and tamper-evident (hash-chained); no update/delete API.</td></tr>
+      <tr><td class="id">DATA-07</td><td>Backups</td><td>Automated encrypted backups; PITR enabled; restores tested quarterly.</td></tr>
+    </tbody>
+  </table>
+
+  <!-- 5 API -->
+  <h2 class="section" id="api"><span class="sec-num">05</span>API Design Standards</h2>
+  <table class="req">
+    <thead><tr><th style="width:13%">ID</th><th>Requirement</th></tr></thead>
+    <tbody>
+      <tr><td class="id">API-01</td><td>REST resources are noun-based, plural, versioned in the path (<code class="inline">/api/v1/...</code>); JSON request/response.</td></tr>
+      <tr><td class="id">API-02</td><td>Every endpoint is defined contract-first in OpenAPI 3.1 and published to the developer portal.</td></tr>
+      <tr><td class="id">API-03</td><td>Errors use RFC 9457 <code class="inline">problem+json</code> with stable error types and a correlation ID.</td></tr>
+      <tr><td class="id">API-04</td><td>Writes accept an <code class="inline">Idempotency-Key</code>; pagination is cursor-based; filtering/sorting via query params.</td></tr>
+      <tr><td class="id">API-05</td><td>All requests authenticated (OAuth 2.0 / OIDC); fine-grained authorization enforced server-side per resource.</td></tr>
+      <tr><td class="id">API-06</td><td>Backward-compatible evolution only within a major version; deprecations announced with a 6-month window.</td></tr>
+    </tbody>
+  </table>
+
+  <!-- 6 SECURITY -->
+  <h2 class="section" id="security"><span class="sec-num">06</span>Security Architecture</h2>
+  <table class="req">
+    <thead><tr><th style="width:13%">ID</th><th style="width:26%">Domain</th><th>Requirement</th></tr></thead>
+    <tbody>
+      <tr><td class="id">TSEC-01</td><td>Encryption</td><td>TLS 1.2+ in transit; AES-256 at rest; keys in managed KMS/HSM, rotated ≤ 90 days.</td></tr>
+      <tr><td class="id">TSEC-02</td><td>AuthN</td><td>OIDC for staff (MFA enforced); CIAM with MFA option for vendors; no shared accounts.</td></tr>
+      <tr><td class="id">TSEC-03</td><td>AuthZ</td><td>RBAC with attribute conditions (country, category); field-level access for Restricted data; deny by default.</td></tr>
+      <tr><td class="id">TSEC-04</td><td>Secrets</td><td>No secrets in code or images; injected from a vault at runtime; automatic rotation.</td></tr>
+      <tr><td class="id">TSEC-05</td><td>Input safety</td><td>Server-side validation, output encoding, parameterised queries; CSP, HSTS, anti-CSRF tokens.</td></tr>
+      <tr><td class="id">TSEC-06</td><td>App security</td><td>Aligned to OWASP ASVS L2; SAST, DAST, dependency and container scanning in CI; annual pen test.</td></tr>
+      <tr><td class="id">TSEC-07</td><td>Logging</td><td>Security events centralised to SIEM; PII/banking masked; tamper-evident.</td></tr>
+      <tr><td class="id">TSEC-08</td><td>Segregation of duties</td><td>SOX controls: no single identity can both create and approve a vendor; enforced in Workflow.</td></tr>
+      <tr><td class="id">TSEC-09</td><td>Tenancy isolation</td><td>Network segmentation between tiers; private subnets for data; egress allow-listed.</td></tr>
+    </tbody>
+  </table>
+
+  <!-- 7 INFRA -->
+  <h2 class="section" id="infra"><span class="sec-num">07</span>Infrastructure &amp; Deployment</h2>
+  <table class="req">
+    <thead><tr><th style="width:13%">ID</th><th style="width:26%">Topic</th><th>Requirement</th></tr></thead>
+    <tbody>
+      <tr><td class="id">INF-01</td><td>Cloud</td><td>Cloud-native, multi-AZ within region; containerised workloads on Kubernetes.</td></tr>
+      <tr><td class="id">INF-02</td><td>Environments</td><td>DEV, SIT, UAT, PROD — isolated networks and credentials; prod-like UAT.</td></tr>
+      <tr><td class="id">INF-03</td><td>IaC</td><td>All infrastructure defined in Terraform; no manual changes in PROD; drift detection enabled.</td></tr>
+      <tr><td class="id">INF-04</td><td>Deployment</td><td>Immutable container images; blue/green or rolling deploys; automated rollback on health-check failure.</td></tr>
+      <tr><td class="id">INF-05</td><td>Configuration</td><td>Externalised config per environment; feature flags for progressive rollout.</td></tr>
+      <tr><td class="id">INF-06</td><td>Autoscaling</td><td>Horizontal pod autoscaling on CPU/latency; cluster autoscaling for nodes.</td></tr>
+    </tbody>
+  </table>
+
+  <!-- 8 OBSERVABILITY -->
+  <h2 class="section" id="obs"><span class="sec-num">08</span>Observability &amp; Operations</h2>
+  <table class="req">
+    <thead><tr><th style="width:13%">ID</th><th style="width:26%">Capability</th><th>Requirement</th></tr></thead>
+    <tbody>
+      <tr><td class="id">OPS-01</td><td>Tracing</td><td>Distributed tracing (OpenTelemetry) end-to-end; <code class="inline">traceparent</code> propagated through gateway, services and integrations.</td></tr>
+      <tr><td class="id">OPS-02</td><td>Metrics</td><td>RED metrics per service + business KPIs (cycle time, SLA breaches) on dashboards.</td></tr>
+      <tr><td class="id">OPS-03</td><td>Logging</td><td>Structured JSON logs, centralised, with correlation ID; retention per policy.</td></tr>
+      <tr><td class="id">OPS-04</td><td>Alerting</td><td>SLO-based alerts with on-call routing; runbooks linked from alerts.</td></tr>
+      <tr><td class="id">OPS-05</td><td>Health</td><td>Liveness/readiness probes; synthetic monitors for critical journeys and interfaces.</td></tr>
+    </tbody>
+  </table>
+
+  <!-- 9 PERFORMANCE -->
+  <h2 class="section" id="perf"><span class="sec-num">09</span>Performance &amp; Scalability</h2>
+  <table class="req">
+    <thead><tr><th style="width:13%">ID</th><th style="width:26%">Target</th><th>Requirement</th></tr></thead>
+    <tbody>
+      <tr><td class="id">PERF-01</td><td>Latency</td><td>API P95 &lt; 400 ms; SPA P95 page interactive &lt; 2.0 s on 5 Mbps.</td></tr>
+      <tr><td class="id">PERF-02</td><td>Concurrency</td><td>≥ 200 concurrent vendor sessions + 50 internal users with no degradation.</td></tr>
+      <tr><td class="id">PERF-03</td><td>Scale</td><td>50 000 active vendors; 10 000 new registrations/year; linear horizontal scaling.</td></tr>
+      <tr><td class="id">PERF-04</td><td>Caching</td><td>Reference data and idempotent reads cached; cache invalidation on config change.</td></tr>
+      <tr><td class="id">PERF-05</td><td>Async offload</td><td>Long-running checks and publishing run asynchronously off the request path.</td></tr>
+    </tbody>
+  </table>
+
+  <!-- 10 DR -->
+  <h2 class="section" id="dr"><span class="sec-num">10</span>Resilience &amp; Disaster Recovery</h2>
+  <table class="req">
+    <thead><tr><th style="width:13%">ID</th><th style="width:26%">Topic</th><th>Requirement</th></tr></thead>
+    <tbody>
+      <tr><td class="id">DR-01</td><td>Availability</td><td>99.5% monthly during business hours; multi-AZ redundancy for all stateful components.</td></tr>
+      <tr><td class="id">DR-02</td><td>RTO / RPO</td><td>RTO ≤ 4 h; RPO ≤ 15 min.</td></tr>
+      <tr><td class="id">DR-03</td><td>Backups</td><td>Automated encrypted backups; cross-region copy; quarterly restore drills.</td></tr>
+      <tr><td class="id">DR-04</td><td>Failure isolation</td><td>Circuit breakers, bulkheads, timeouts and DLQs prevent cascading failures.</td></tr>
+      <tr><td class="id">DR-05</td><td>Graceful degradation</td><td>If an external provider is down, the journey queues work and informs the user rather than failing hard.</td></tr>
+    </tbody>
+  </table>
+
+  <!-- 11 QUALITY -->
+  <h2 class="section" id="quality"><span class="sec-num">11</span>Quality, CI/CD &amp; Constraints</h2>
+  <h3 class="sub"><span class="sub-num">11.1</span>Engineering Quality</h3>
+  <table class="req">
+    <thead><tr><th style="width:13%">ID</th><th>Requirement</th></tr></thead>
+    <tbody>
+      <tr><td class="id">QA-01</td><td>Unit + integration test coverage ≥ 80% on changed code; quality gate blocks merges below threshold.</td></tr>
+      <tr><td class="id">QA-02</td><td>Consumer-driven contract tests for every interface (see IRD §10) run in CI.</td></tr>
+      <tr><td class="id">QA-03</td><td>Automated accessibility checks (axe) and Lighthouse budgets in the pipeline.</td></tr>
+      <tr><td class="id">QA-04</td><td>SAST, DAST, SCA and container image scanning gate every release; criticals block.</td></tr>
+      <tr><td class="id">QA-05</td><td>Performance/load tests run before each major release against UAT.</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sub"><span class="sub-num">11.2</span>Constraints &amp; Standards</h3>
+  <ul>
+    <li>All code in version control; trunk-based or short-lived branches with mandatory peer review.</li>
+    <li>Browser support: latest 2 versions of Chrome, Edge, Firefox, Safari; no IE.</li>
+    <li>Compliance alignment: GDPR, CCPA, SOX; OWASP ASVS L2; WCAG 2.2 AA.</li>
+    <li>Infrastructure and application changes follow the organisation's change-management process.</li>
+    <li>Third-party libraries must have an approved licence and no known critical CVEs at release.</li>
+  </ul>
+
+  <div class="signoff">
+    <div class="sig"><div class="role">Approved · CTO</div><div class="name">________________________</div></div>
+    <div class="sig"><div class="role">Approved · CISO</div><div class="name">________________________</div></div>
+    <div class="sig"><div class="role">Approved · Head of Platform Eng.</div><div class="name">________________________</div></div>
+    <div class="sig"><div class="role">Approved · Solution Architect</div><div class="name">________________________</div></div>
+  </div>
+
+  <div class="page-footer">
+    <span>TRD-VRP-001 · v1.0 Draft</span>
+    <span>Vendor Registration Portal</span>
+    <span>Page 1</span>
+  </div>
+</article>
+
+</body>
+</html>

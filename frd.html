@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>FRD — Vendor Registration Portal</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="doc.css">
+</head>
+<body>
+
+<nav class="doc-nav">
+  <a href="requirements.html">Overview</a>
+  <a href="frd.html" class="active">Functional (FRD)</a>
+  <a href="ird.html">Integration (IRD)</a>
+  <a href="trd.html">Technical (TRD)</a>
+</nav>
+
+<article class="page" data-screen-label="FRD">
+  <header class="doc-header">
+    <div class="meta-left">
+      <div class="doc-kind">Functional Requirements Document</div>
+      <div class="project">Vendor Registration Portal</div>
+    </div>
+    <div class="meta-right">
+      <div><b>Document ID</b> &nbsp; FRD-VRP-001</div>
+      <div><b>Version</b> &nbsp; 1.0 (Draft)</div>
+      <div><b>Date</b> &nbsp; May 21, 2026</div>
+      <div><b>Classification</b> &nbsp; Internal</div>
+    </div>
+  </header>
+
+  <h1 class="doc-title">Functional Requirements</h1>
+  <p class="doc-subtitle">Capabilities, user journeys, and business rules for the Vendor Registration Portal.</p>
+
+  <table class="cover-meta">
+    <tr><th>Owner</th><td>Procurement Operations</td></tr>
+    <tr><th>Author</th><td>Business Analysis Team</td></tr>
+    <tr><th>Approvers</th><td>Head of Procurement · CFO · CISO · CIO</td></tr>
+    <tr><th>Status</th><td>Draft for stakeholder review</td></tr>
+    <tr><th>Related</th><td>IRD-VRP-001, TRD-VRP-001</td></tr>
+  </table>
+
+  <div class="toc">
+    <div class="toc-title">Contents</div>
+    <ol>
+      <li><a href="#purpose">Purpose &amp; Scope</a><span class="dots"></span></li>
+      <li><a href="#glossary">Definitions &amp; Glossary</a><span class="dots"></span></li>
+      <li><a href="#actors">Actors &amp; Roles</a><span class="dots"></span></li>
+      <li><a href="#overview">Functional Overview</a><span class="dots"></span></li>
+      <li><a href="#fr">Functional Requirements</a><span class="dots"></span></li>
+      <li><a href="#rules">Business Rules</a><span class="dots"></span></li>
+      <li><a href="#flows">Process Flows</a><span class="dots"></span></li>
+      <li><a href="#nfr">Non-Functional Requirements</a><span class="dots"></span></li>
+      <li><a href="#assumptions">Assumptions, Risks &amp; Dependencies</a><span class="dots"></span></li>
+      <li><a href="#acceptance">Acceptance Criteria</a><span class="dots"></span></li>
+    </ol>
+  </div>
+
+  <!-- 1 PURPOSE -->
+  <h2 class="section" id="purpose"><span class="sec-num">01</span>Purpose &amp; Scope</h2>
+  <p class="lead">The Vendor Registration Portal (VRP) provides a single, controlled channel for prospective and existing vendors to register, submit qualification information, manage their organisation profile, and be onboarded into downstream procurement and finance systems.</p>
+
+  <h4 class="sub2">In Scope</h4>
+  <ul>
+    <li>Self-service vendor account creation and email verification.</li>
+    <li>Multi-step registration capturing company, tax, banking, compliance and category data.</li>
+    <li>Document upload (incorporation certificate, tax certificates, insurance, ISO/quality, MSA).</li>
+    <li>Internal review workflow with multi-level approval, clarifications, and rejection.</li>
+    <li>Vendor profile management, re-verification cycles, and change requests.</li>
+    <li>Audit trail of every state transition and field change.</li>
+    <li>Notification (email and in-portal) of status changes and pending actions.</li>
+  </ul>
+
+  <h4 class="sub2">Out of Scope</h4>
+  <ul>
+    <li>Sourcing, RFx, contract authoring, purchase order issuance and invoice processing (handled by downstream ERP / S2P).</li>
+    <li>Vendor performance scorecards and SRM analytics.</li>
+    <li>Master Data Governance UI for existing vendor records imported historically.</li>
+  </ul>
+
+  <!-- 2 GLOSSARY -->
+  <h2 class="section" id="glossary"><span class="sec-num">02</span>Definitions &amp; Glossary</h2>
+  <dl class="defs">
+    <dt>VRP</dt><dd>Vendor Registration Portal — the application described in this document.</dd>
+    <dt>Vendor</dt><dd>An external legal entity registering to supply goods or services.</dd>
+    <dt>Requestor</dt><dd>Internal employee sponsoring a vendor's onboarding.</dd>
+    <dt>Approver</dt><dd>Internal user authorised to approve/reject a registration at a given level.</dd>
+    <dt>Qualification</dt><dd>The set of checks (tax, sanctions, finance, compliance) a vendor must pass.</dd>
+    <dt>MDM</dt><dd>Master Data Management — system of record for the vendor master record.</dd>
+    <dt>SLA</dt><dd>Service Level Agreement — committed response or processing time.</dd>
+    <dt>PII / PCI</dt><dd>Personally Identifiable Information / Payment Card Industry data.</dd>
+  </dl>
+
+  <!-- 3 ACTORS -->
+  <h2 class="section" id="actors"><span class="sec-num">03</span>Actors &amp; Roles</h2>
+  <table class="req">
+    <thead><tr><th style="width:22%">Role</th><th style="width:14%">Type</th><th>Responsibilities</th><th style="width:18%">Authentication</th></tr></thead>
+    <tbody>
+      <tr><td><b>Vendor Primary Contact</b></td><td>External</td><td>Registers the organisation, completes the multi-step form, uploads documents, responds to clarifications, maintains profile.</td><td>Email + password, MFA (TOTP) optional</td></tr>
+      <tr><td><b>Vendor Delegate</b></td><td>External</td><td>Additional user invited by the primary contact to assist with submission and maintenance.</td><td>Email + password, MFA optional</td></tr>
+      <tr><td><b>Requestor</b></td><td>Internal</td><td>Initiates a sponsored invitation, attaches business justification, monitors progress.</td><td>SSO (OIDC)</td></tr>
+      <tr><td><b>Procurement Reviewer</b></td><td>Internal</td><td>First-line review of completeness, category fit, document validity.</td><td>SSO (OIDC) · MFA enforced</td></tr>
+      <tr><td><b>Compliance Officer</b></td><td>Internal</td><td>Sanctions, AML/KYC, ABAC and conflict-of-interest review.</td><td>SSO (OIDC) · MFA enforced</td></tr>
+      <tr><td><b>Finance Reviewer</b></td><td>Internal</td><td>Verifies banking, tax and credit information.</td><td>SSO (OIDC) · MFA enforced</td></tr>
+      <tr><td><b>Approver (L1 / L2)</b></td><td>Internal</td><td>Final approval based on category, geography and risk tier.</td><td>SSO (OIDC) · MFA enforced</td></tr>
+      <tr><td><b>VRP Administrator</b></td><td>Internal</td><td>Manages reference data, workflow configuration, roles and integrations.</td><td>SSO (OIDC) · privileged access</td></tr>
+      <tr><td><b>Auditor</b></td><td>Internal</td><td>Read-only access to audit trail and submitted artefacts.</td><td>SSO (OIDC)</td></tr>
+    </tbody>
+  </table>
+
+  <!-- 4 OVERVIEW -->
+  <h2 class="section" id="overview"><span class="sec-num">04</span>Functional Overview</h2>
+
+  <div class="flow">
+    <div class="node"><span class="n-id">F1</span><span class="n-label">Invite / Register</span><div class="n-desc">Self-serve or sponsored entry</div></div>
+    <div class="arrow">→</div>
+    <div class="node"><span class="n-id">F2</span><span class="n-label">Profile &amp; Docs</span><div class="n-desc">Multi-step form with save &amp; resume</div></div>
+    <div class="arrow">→</div>
+    <div class="node"><span class="n-id">F3</span><span class="n-label">Auto-checks</span><div class="n-desc">Tax, sanctions, duplicate detection</div></div>
+    <div class="arrow">→</div>
+    <div class="node"><span class="n-id">F4</span><span class="n-label">Review &amp; Approve</span><div class="n-desc">Procurement → Compliance → Finance → Approver</div></div>
+    <div class="arrow">→</div>
+    <div class="node"><span class="n-id">F5</span><span class="n-label">Onboarded</span><div class="n-desc">Pushed to ERP/MDM; ID issued</div></div>
+  </div>
+
+  <!-- 5 FUNCTIONAL REQUIREMENTS -->
+  <h2 class="section" id="fr"><span class="sec-num">05</span>Functional Requirements</h2>
+
+  <h3 class="sub"><span class="sub-num">5.1</span>Account &amp; Access Management</h3>
+  <table class="req">
+    <thead><tr><th style="width:13%">ID</th><th style="width:30%">Requirement</th><th>Description</th><th style="width:10%">Priority</th></tr></thead>
+    <tbody>
+      <tr><td class="id">FR-AAM-01</td><td>Self-service registration</td><td>An anonymous vendor user shall be able to create a portal account using a corporate email address and a password meeting the password policy defined in §5.10.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-AAM-02</td><td>Email verification</td><td>The system shall require email ownership verification via a one-time link valid for 24 hours before account activation.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-AAM-03</td><td>Sponsored invitation</td><td>A Requestor shall be able to invite a vendor by email; the invitation pre-populates the requesting business unit, category, and justification.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-AAM-04</td><td>Multi-factor authentication</td><td>MFA via TOTP shall be available for vendors and mandatory for internal users.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-AAM-05</td><td>Delegate users</td><td>The vendor primary contact shall be able to invite up to 5 delegate users, each with scoped permissions (View, Edit, Submit).</td><td>SHOULD</td></tr>
+      <tr><td class="id">FR-AAM-06</td><td>Password recovery</td><td>Users shall be able to reset their password via a time-limited (30 min) one-time link.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-AAM-07</td><td>Account lockout</td><td>The system shall lock an account after 5 failed login attempts within 10 minutes and require admin or self-service unlock.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-AAM-08</td><td>Internal SSO</td><td>Internal users shall authenticate via the corporate identity provider (OIDC); local accounts shall not be issued.</td><td class="pri-1">MUST</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sub"><span class="sub-num">5.2</span>Vendor Profile Capture</h3>
+  <table class="req">
+    <thead><tr><th style="width:13%">ID</th><th style="width:30%">Requirement</th><th>Description</th><th style="width:10%">Priority</th></tr></thead>
+    <tbody>
+      <tr><td class="id">FR-PRO-01</td><td>Multi-step wizard</td><td>The registration journey shall be presented as a stepped wizard with sections: Company, Contacts, Addresses, Tax, Banking, Categories, Compliance, Documents, Review &amp; Submit.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-PRO-02</td><td>Save &amp; resume</td><td>Partial data shall be persisted on every step navigation; the vendor can return within 90 days to complete.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-PRO-03</td><td>Country-aware fields</td><td>Field set (tax ID format, bank account structure, mandatory documents) shall adapt to the vendor's country of incorporation.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-PRO-04</td><td>Multi-currency banking</td><td>Vendors shall be able to declare up to 5 bank accounts, each with currency, IBAN/local number, SWIFT/BIC, and intermediary bank details.</td><td>SHOULD</td></tr>
+      <tr><td class="id">FR-PRO-05</td><td>Category selection</td><td>The vendor shall select 1–10 supply categories from the corporate taxonomy (UNSPSC L3) with optional sub-category descriptors.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-PRO-06</td><td>Ultimate Beneficial Owner</td><td>The form shall capture UBO information for any individual holding ≥ 25% direct or indirect ownership.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-PRO-07</td><td>Diversity &amp; ESG attributes</td><td>The vendor shall optionally declare diversity classifications (e.g. SME, women-owned, minority-owned) and ESG certifications.</td><td>SHOULD</td></tr>
+      <tr><td class="id">FR-PRO-08</td><td>Inline validation</td><td>All fields shall be validated client-side on blur and server-side on submit, with field-level error messages.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-PRO-09</td><td>Localisation</td><td>The portal UI shall support English, Spanish, French, German, Portuguese and Japanese.</td><td>SHOULD</td></tr>
+      <tr><td class="id">FR-PRO-10</td><td>Accessibility</td><td>All vendor-facing screens shall meet WCAG 2.2 AA.</td><td class="pri-1">MUST</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sub"><span class="sub-num">5.3</span>Document Management</h3>
+  <table class="req">
+    <thead><tr><th style="width:13%">ID</th><th style="width:30%">Requirement</th><th>Description</th><th style="width:10%">Priority</th></tr></thead>
+    <tbody>
+      <tr><td class="id">FR-DOC-01</td><td>Required document matrix</td><td>The required document list shall be computed from country, category, and risk tier; the system shall block submission while any mandatory document is missing.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-DOC-02</td><td>Upload formats</td><td>Accepted formats: PDF, PNG, JPG, DOCX, XLSX. Maximum 25 MB per file; up to 50 files per registration.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-DOC-03</td><td>Malware scanning</td><td>All uploads shall be scanned synchronously; infected files are rejected with a clear, non-leaky error.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-DOC-04</td><td>Expiry tracking</td><td>Documents with expiry (insurance, tax certificates) shall capture an expiry date; the system notifies the vendor and assigned reviewer 60/30/7 days before expiry.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-DOC-05</td><td>e-Signature on T&amp;Cs</td><td>The vendor shall electronically accept the Supplier Code of Conduct and Master Terms; the signed PDF and hash are retained.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-DOC-06</td><td>Versioning</td><td>Replacing a document creates a new version; previous versions remain retrievable by Auditors.</td><td>SHOULD</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sub"><span class="sub-num">5.4</span>Automated Qualification Checks</h3>
+  <table class="req">
+    <thead><tr><th style="width:13%">ID</th><th style="width:30%">Requirement</th><th>Description</th><th style="width:10%">Priority</th></tr></thead>
+    <tbody>
+      <tr><td class="id">FR-QUA-01</td><td>Duplicate detection</td><td>On submission, the system shall search MDM and active registrations for matches on legal name, tax ID, and address; near-matches above a configurable similarity threshold are flagged for reviewer attention.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-QUA-02</td><td>Tax ID validation</td><td>Tax IDs shall be validated against external registries (e.g. VIES for EU, IRS TIN matching for US) where supported.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-QUA-03</td><td>Sanctions &amp; PEP screening</td><td>The organisation, all officers and UBOs shall be screened against sanctions, watchlist and PEP databases; hits create a Compliance task.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-QUA-04</td><td>Credit data lookup</td><td>For risk-tier B and above the system shall retrieve a credit profile and attach the summary to the record.</td><td>SHOULD</td></tr>
+      <tr><td class="id">FR-QUA-05</td><td>Bank account verification</td><td>Where supported, banking details are validated via the banking partner (account name match, IBAN check digit, routing number).</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-QUA-06</td><td>Risk scoring</td><td>The system shall compute a risk score (Low / Medium / High) based on country, category, ownership, and check outcomes; the score drives the review path.</td><td class="pri-1">MUST</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sub"><span class="sub-num">5.5</span>Review &amp; Approval Workflow</h3>
+  <table class="req">
+    <thead><tr><th style="width:13%">ID</th><th style="width:30%">Requirement</th><th>Description</th><th style="width:10%">Priority</th></tr></thead>
+    <tbody>
+      <tr><td class="id">FR-WF-01</td><td>Configurable workflow</td><td>Workflows shall be configured by Administrators using a no-code rule set (conditions on country, category, spend, risk).</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-WF-02</td><td>Task assignment</td><td>Tasks shall be routed to a group queue; any group member can claim; round-robin assignment is supported as an option.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-WF-03</td><td>Clarification loop</td><td>A reviewer shall be able to return a registration to the vendor with field-level comments; the vendor edits the affected fields only and re-submits.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-WF-04</td><td>Parallel review</td><td>Procurement, Compliance and Finance reviews shall run in parallel; final approval is gated on all three completing.</td><td>SHOULD</td></tr>
+      <tr><td class="id">FR-WF-05</td><td>SLA timers</td><td>Each step has a configurable SLA; breaches escalate to the manager queue and are visible on dashboards.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-WF-06</td><td>Rejection</td><td>An approver may reject with a structured reason code; the vendor record moves to <code class="inline">REJECTED</code> and cannot be re-submitted within 90 days unless an Administrator overrides.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-WF-07</td><td>Delegation</td><td>Approvers shall be able to delegate authority for a date range to a named substitute.</td><td>SHOULD</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sub"><span class="sub-num">5.6</span>Onboarding &amp; Downstream Publishing</h3>
+  <table class="req">
+    <thead><tr><th style="width:13%">ID</th><th style="width:30%">Requirement</th><th>Description</th><th style="width:10%">Priority</th></tr></thead>
+    <tbody>
+      <tr><td class="id">FR-ONB-01</td><td>Vendor ID assignment</td><td>On final approval the system shall request a vendor master record ID from MDM and store it on the VRP record.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-ONB-02</td><td>ERP publish</td><td>The approved vendor (header, addresses, banking, tax, contacts) shall be published to ERP via the integration in §IRD-INT-04.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-ONB-03</td><td>Welcome pack</td><td>The vendor shall receive an automated welcome email with their vendor ID, portal links, and PO/invoice submission instructions.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-ONB-04</td><td>Failure handling</td><td>If downstream publishing fails, the record moves to <code class="inline">PUBLISH_FAILED</code> with a retry workflow visible to the Administrator.</td><td class="pri-1">MUST</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sub"><span class="sub-num">5.7</span>Profile Maintenance &amp; Re-Qualification</h3>
+  <table class="req">
+    <thead><tr><th style="width:13%">ID</th><th style="width:30%">Requirement</th><th>Description</th><th style="width:10%">Priority</th></tr></thead>
+    <tbody>
+      <tr><td class="id">FR-MNT-01</td><td>Change requests</td><td>Vendors shall raise change requests on a per-section basis; sensitive changes (banking, legal name, ownership) require re-approval.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-MNT-02</td><td>Annual attestation</td><td>Once per year vendors shall be prompted to attest that profile data and compliance status remain accurate.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-MNT-03</td><td>Re-screen schedule</td><td>Sanctions and watchlist screening shall be re-run automatically every 30 days for active vendors.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-MNT-04</td><td>Inactivation</td><td>Vendors may be inactivated by an Administrator with reason code; ERP receives an inactivation event.</td><td class="pri-1">MUST</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sub"><span class="sub-num">5.8</span>Notifications</h3>
+  <table class="req">
+    <thead><tr><th style="width:13%">ID</th><th style="width:30%">Requirement</th><th>Description</th><th style="width:10%">Priority</th></tr></thead>
+    <tbody>
+      <tr><td class="id">FR-NOT-01</td><td>Channel</td><td>Notifications shall be delivered via email and as in-portal events; SMS shall be available for MFA only.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-NOT-02</td><td>Templates</td><td>Email templates shall be editable by Administrators per locale.</td><td>SHOULD</td></tr>
+      <tr><td class="id">FR-NOT-03</td><td>Digest</td><td>Internal users may opt for a daily digest in place of per-event email.</td><td>MAY</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sub"><span class="sub-num">5.9</span>Search, Reporting &amp; Audit</h3>
+  <table class="req">
+    <thead><tr><th style="width:13%">ID</th><th style="width:30%">Requirement</th><th>Description</th><th style="width:10%">Priority</th></tr></thead>
+    <tbody>
+      <tr><td class="id">FR-RPT-01</td><td>Search</td><td>Internal users shall be able to search registrations by name, tax ID, country, status, owner, category, and date range.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-RPT-02</td><td>Operational dashboards</td><td>Out-of-the-box dashboards: pipeline by stage, SLA adherence, rejection reasons, cycle time, registrations by country/category.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-RPT-03</td><td>Export</td><td>Search results and reports shall be exportable to CSV and XLSX with column-level redaction for sensitive fields.</td><td>SHOULD</td></tr>
+      <tr><td class="id">FR-RPT-04</td><td>Audit trail</td><td>Every state change, field edit, document upload, login and configuration change shall be recorded with actor, timestamp, before/after values, and source IP.</td><td class="pri-1">MUST</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sub"><span class="sub-num">5.10</span>Security &amp; Privacy (Functional view)</h3>
+  <table class="req">
+    <thead><tr><th style="width:13%">ID</th><th style="width:30%">Requirement</th><th>Description</th><th style="width:10%">Priority</th></tr></thead>
+    <tbody>
+      <tr><td class="id">FR-SEC-01</td><td>Password policy</td><td>Minimum 12 characters, mixed case, digit and symbol; cannot match last 5; checked against a known-breached password list.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-SEC-02</td><td>Session</td><td>Idle timeout 20 min; absolute session 8 h; concurrent sessions allowed but visible to the user.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-SEC-03</td><td>Field-level access</td><td>Banking, tax and UBO fields shall be visible only to Finance, Compliance and Auditor roles.</td><td class="pri-1">MUST</td></tr>
+      <tr><td class="id">FR-SEC-04</td><td>Data subject rights</td><td>The system shall support data export and erasure requests for vendor contact PII within statutory timelines.</td><td class="pri-1">MUST</td></tr>
+    </tbody>
+  </table>
+
+  <!-- 6 BUSINESS RULES -->
+  <h2 class="section" id="rules"><span class="sec-num">06</span>Business Rules</h2>
+
+  <div class="req-card">
+    <span class="rc-id">BR-001</span><span class="rc-title">No duplicate active vendors.</span>
+    <div class="rc-body">A vendor with the same Tax ID and country cannot exist in <code class="inline">ACTIVE</code> state more than once. The system blocks publishing if MDM reports an existing active record.</div>
+  </div>
+  <div class="req-card">
+    <span class="rc-id">BR-002</span><span class="rc-title">High-risk geography requires L2.</span>
+    <div class="rc-body">If country of incorporation is on the Restricted Countries List, the workflow always requires L2 approval and Compliance Officer sign-off, regardless of spend.</div>
+  </div>
+  <div class="req-card">
+    <span class="rc-id">BR-003</span><span class="rc-title">Bank-name mismatch halts onboarding.</span>
+    <div class="rc-body">If the declared bank account name does not match legal name or registered DBA, the record cannot progress past Finance review without a written justification attached.</div>
+  </div>
+  <div class="req-card">
+    <span class="rc-id">BR-004</span><span class="rc-title">Sanctions hit = freeze.</span>
+    <div class="rc-body">A positive sanctions or watchlist hit moves the record to <code class="inline">ON_HOLD</code> until Compliance dispositions the alert; auto-publishing is disabled.</div>
+  </div>
+  <div class="req-card">
+    <span class="rc-id">BR-005</span><span class="rc-title">Banking changes require dual control.</span>
+    <div class="rc-body">Any change to bank account details on an active vendor requires two distinct internal approvers and a callback verification with the vendor on a previously verified phone number.</div>
+  </div>
+  <div class="req-card">
+    <span class="rc-id">BR-006</span><span class="rc-title">Expired insurance blocks orders.</span>
+    <div class="rc-body">If a required insurance document expires and is not renewed within 14 days, the vendor's status is set to <code class="inline">SUSPENDED</code> and a suspension event is sent to ERP.</div>
+  </div>
+
+  <!-- 7 FLOWS -->
+  <h2 class="section" id="flows"><span class="sec-num">07</span>Process Flows</h2>
+
+  <h3 class="sub"><span class="sub-num">7.1</span>Happy Path — Self-Service Registration</h3>
+  <ol>
+    <li>Vendor lands on portal home, creates an account, verifies email.</li>
+    <li>Vendor completes wizard sections 1–8, uploads documents, e-signs T&amp;Cs.</li>
+    <li>System runs automated qualification checks (FR-QUA-01 … 06).</li>
+    <li>Procurement Reviewer reviews completeness within 2 business days.</li>
+    <li>Compliance and Finance reviews complete in parallel within 3 business days.</li>
+    <li>L1 (or L2 if BR-002 applies) Approver approves.</li>
+    <li>System requests Vendor ID from MDM, publishes to ERP, sends welcome pack.</li>
+  </ol>
+
+  <h3 class="sub"><span class="sub-num">7.2</span>Clarification Loop</h3>
+  <ol>
+    <li>Reviewer marks one or more fields with structured comments and returns the record.</li>
+    <li>Vendor receives a single notification listing all open items.</li>
+    <li>Vendor edits only flagged fields; system tracks deltas and presents them to the reviewer on resubmission.</li>
+    <li>SLA timer resumes for the reviewer once the vendor resubmits.</li>
+  </ol>
+
+  <h3 class="sub"><span class="sub-num">7.3</span>State Model</h3>
+  <table class="req">
+    <thead><tr><th>State</th><th>Entered When</th><th>Allowed Transitions</th></tr></thead>
+    <tbody>
+      <tr><td class="id">DRAFT</td><td>Vendor saves any field</td><td>→ SUBMITTED · ABANDONED</td></tr>
+      <tr><td class="id">SUBMITTED</td><td>Vendor submits</td><td>→ UNDER_REVIEW · REJECTED</td></tr>
+      <tr><td class="id">UNDER_REVIEW</td><td>First reviewer claims a task</td><td>→ CLARIFICATION · APPROVED · REJECTED · ON_HOLD</td></tr>
+      <tr><td class="id">CLARIFICATION</td><td>Reviewer returns to vendor</td><td>→ SUBMITTED</td></tr>
+      <tr><td class="id">ON_HOLD</td><td>Sanctions or fraud alert</td><td>→ UNDER_REVIEW · REJECTED</td></tr>
+      <tr><td class="id">APPROVED</td><td>Final approver signs off</td><td>→ PUBLISHING</td></tr>
+      <tr><td class="id">PUBLISHING</td><td>Onboarding job started</td><td>→ ACTIVE · PUBLISH_FAILED</td></tr>
+      <tr><td class="id">ACTIVE</td><td>ERP confirms creation</td><td>→ SUSPENDED · INACTIVE</td></tr>
+      <tr><td class="id">SUSPENDED</td><td>Compliance breach or doc expiry</td><td>→ ACTIVE · INACTIVE</td></tr>
+      <tr><td class="id">REJECTED</td><td>Approver rejects</td><td>(terminal · re-registration after 90 days)</td></tr>
+      <tr><td class="id">INACTIVE</td><td>Administrator inactivates</td><td>→ ACTIVE</td></tr>
+    </tbody>
+  </table>
+
+  <!-- 8 NFR -->
+  <h2 class="section" id="nfr"><span class="sec-num">08</span>Non-Functional Requirements</h2>
+  <table class="req">
+    <thead><tr><th style="width:13%">ID</th><th style="width:20%">Category</th><th>Target</th></tr></thead>
+    <tbody>
+      <tr><td class="id">NFR-PER-01</td><td>Performance</td><td>P95 page load &lt; 2.0 s on a 5 Mbps link; API P95 &lt; 400 ms.</td></tr>
+      <tr><td class="id">NFR-PER-02</td><td>Throughput</td><td>Sustain 200 concurrent vendor sessions and 50 internal reviewers without degradation.</td></tr>
+      <tr><td class="id">NFR-AVA-01</td><td>Availability</td><td>99.5% monthly during business hours (06:00–22:00 local in three regions).</td></tr>
+      <tr><td class="id">NFR-AVA-02</td><td>RTO / RPO</td><td>RTO ≤ 4 h, RPO ≤ 15 min.</td></tr>
+      <tr><td class="id">NFR-SCA-01</td><td>Scalability</td><td>Support 50 000 active vendors and 10 000 new registrations / year with linear horizontal scaling.</td></tr>
+      <tr><td class="id">NFR-USA-01</td><td>Usability</td><td>Median time-to-complete first submission ≤ 35 minutes; SUS score ≥ 75.</td></tr>
+      <tr><td class="id">NFR-LOC-01</td><td>Localisation</td><td>UI, error messages, emails, and date/number formats fully translatable per locale.</td></tr>
+      <tr><td class="id">NFR-COM-01</td><td>Compliance</td><td>GDPR, CCPA, SOX (segregation of duties), country-specific data residency.</td></tr>
+      <tr><td class="id">NFR-RET-01</td><td>Retention</td><td>Submission artefacts retained 10 years; audit log 7 years.</td></tr>
+    </tbody>
+  </table>
+
+  <!-- 9 ASSUMPTIONS -->
+  <h2 class="section" id="assumptions"><span class="sec-num">09</span>Assumptions, Risks &amp; Dependencies</h2>
+  <div class="two-col">
+    <div>
+      <h4 class="sub2">Assumptions</h4>
+      <ul>
+        <li>The corporate identity provider supports OIDC and SCIM for internal users.</li>
+        <li>ERP exposes (or can expose) a synchronous vendor-creation API.</li>
+        <li>MDM is the system of record for the Vendor ID.</li>
+        <li>Existing UNSPSC L3 taxonomy is available as reference data.</li>
+      </ul>
+    </div>
+    <div>
+      <h4 class="sub2">Risks</h4>
+      <ul>
+        <li>Third-party sanctions service latency could breach SLA → mitigated with async screening and caching.</li>
+        <li>Data residency requirements may fragment hosting → addressed in TRD §3.</li>
+        <li>Change-management impact on procurement teams → covered by training plan.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- 10 ACCEPTANCE -->
+  <h2 class="section" id="acceptance"><span class="sec-num">10</span>Acceptance Criteria</h2>
+  <ol>
+    <li>All MUST requirements pass functional UAT with 0 critical and ≤ 3 major defects.</li>
+    <li>End-to-end happy path completes in &lt; 35 minutes for a representative test vendor.</li>
+    <li>SLA dashboards populate within 5 minutes of state transitions in steady state.</li>
+    <li>WCAG 2.2 AA audit report shows no Level A or AA failures on the vendor journey.</li>
+    <li>Penetration test produces no Critical findings and ≤ 2 High findings, all remediated before go-live.</li>
+  </ol>
+
+  <div class="signoff">
+    <div class="sig"><div class="role">Approved · Head of Procurement</div><div class="name">________________________</div></div>
+    <div class="sig"><div class="role">Approved · CIO</div><div class="name">________________________</div></div>
+    <div class="sig"><div class="role">Approved · CISO</div><div class="name">________________________</div></div>
+    <div class="sig"><div class="role">Approved · CFO</div><div class="name">________________________</div></div>
+  </div>
+
+  <div class="page-footer">
+    <span>FRD-VRP-001 · v1.0 Draft</span>
+    <span>Vendor Registration Portal</span>
+    <span>Page 1</span>
+  </div>
+</article>
+
+</body>
+</html>
